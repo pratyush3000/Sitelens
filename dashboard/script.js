@@ -6,18 +6,19 @@ let timer = null;
 const $ = id => document.getElementById(id);
 
 // Get token from localStorage
+// Get token from localStorage
 function getToken() {
-  return localStorage.getItem("sitelens_token") || authToken;
+  return localStorage.getItem("sitelens_token");
 }
 
 function setToken(token) {
-  authToken = token;
   if (token) {
     localStorage.setItem("sitelens_token", token);
   } else {
     localStorage.removeItem("sitelens_token");
   }
 }
+
 
 // base API helper with auth
 const api = (path, opts = {}) => {
