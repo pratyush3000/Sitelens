@@ -7,10 +7,12 @@ import cors from "cors";
 import { connectDB } from "./db.js";
 import Log from "./models/Log.js";
 import Site from "./models/Site.js";
+import User from "./models/User.js";
 
 import { MONITORING_CONFIG, validateEnvironment } from "./config.js";
 import { logError, performHealthCheck, ERROR_LEVELS } from "./utils/errorHandler.js";
 import { DataCleanup, startCleanupScheduler } from "./utils/dataCleanup.js";
+import { authenticateToken, generateToken } from "./utils/auth.js";
 
 import monitorModule, { addNewWebsite, removeWebsite } from "./monitor.js"; // importing monitor starts monitoring in that module
 
@@ -22,10 +24,96 @@ const app = express();
 const PORT = MONITORING_CONFIG.serverPort;
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({ credentials: true, origin: true }));
 
 // Serve dashboard static files (if you have web UI in /dashboard)
 app.use("/dashboard", express.static("dashboard"));
+
+// ==================== AUTHENTICATION ROUTES ====================
+
+// Sign up
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    
+    if (!username || !email || !password) {
+      return res.status(400).json({ success: false, message: "Username, email, and password are required" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    // Check if user exists
+    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "User already exists" });
+    }
+
+    // Create user
+    const user = await User.create({ username, email, password });
+    const token = generateToken(user._id);
+
+    res.json({ 
+      success: true, 
+      message: "User created successfully",
+      token,
+      user: { id: user._id, username: user.username, email: user.email }
+    });
+  } catch (err) {
+    logError(err, { operation: "signup" }, ERROR_LEVELS.MEDIUM);
+    res.status(500).json({ success: false, message: "Failed to create user" });
+  }
+});
+
+// Login
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password are required" });
+    }
+
+    // Find user
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+
+    // Check password
+    const isValid = await user.comparePassword(password);
+    if (!isValid) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+
+    const token = generateToken(user._id);
+
+    res.json({ 
+      success: true, 
+      message: "Login successful",
+      token,
+      user: { id: user._id, username: user.username, email: user.email }
+    });
+  } catch (err) {
+    logError(err, { operation: "login" }, ERROR_LEVELS.MEDIUM);
+    res.status(500).json({ success: false, message: "Login failed" });
+  }
+});
+
+// Get current user (verify token)
+app.get("/api/auth/me", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select("-password");
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    res.json({ success: true, user: { id: user._id, username: user.username, email: user.email } });
+  } catch (err) {
+    logError(err, { operation: "getUser" }, ERROR_LEVELS.MEDIUM);
+    res.status(500).json({ success: false, message: "Failed to get user" });
+  }
+});
 
 // Data cleanup init
 const LOG_FILE = path.join(process.cwd(), "monitor_logs.json"); // kept for compatibility if any old code uses it
@@ -61,10 +149,10 @@ app.post("/collect", async (req, res) => {
 });
 
 // Stats endpoint: aggregate logs per site and return computed metrics
-app.get("/stats", async (req, res) => {
+app.get("/stats", authenticateToken, async (req, res) => {
   try {
-    // load logs (you can paginate / filter by query params later)
-    const logs = await Log.find().sort({ timestamp: 1 }).lean();
+    // load logs for this user only
+    const logs = await Log.find({ userId: req.userId }).sort({ timestamp: 1 }).lean();
 
     // group logs by site
     const grouped = {};
@@ -162,12 +250,12 @@ app.get("/stats", async (req, res) => {
 });
 
 // Add site endpoint - used by dashboard to start monitoring immediately
-app.post("/api/add-site", async (req, res) => {
+app.post("/api/add-site", authenticateToken, async (req, res) => {
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ success: false, message: "URL is required" });
 
-    const result = await addNewWebsite(url);
+    const result = await addNewWebsite(url, req.userId);
     if (!result.success) return res.status(400).json(result);
 
     res.json(result);
@@ -178,12 +266,12 @@ app.post("/api/add-site", async (req, res) => {
 });
 
 // Remove site endpoint - stops future monitoring for that URL
-app.post("/api/remove-site", async (req, res) => {
+app.post("/api/remove-site", authenticateToken, async (req, res) => {
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ success: false, message: "URL is required" });
 
-    const result = await removeWebsite(url);
+    const result = await removeWebsite(url, req.userId);
     // Always return success (removeWebsite handles edge cases gracefully)
     res.json(result);
   } catch (err) {

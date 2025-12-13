@@ -56,6 +56,104 @@ html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-
 /* drawer */
 .drawer{position:fixed;right:0;top:0;height:100%;width:420px;background:linear-gradient(180deg,#071029, #071626);box-shadow:-30px 0 80px rgba(2,6,23,0.6);padding:18px;z-index:60;border-left:1px solid rgba(255,255,255,0.03);overflow:auto}
 .hidden{display:none}
+
+/* Auth Modal */
+.auth-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.auth-container {
+  background: var(--card);
+  padding: 30px;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.auth-container h2 {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.auth-tab.active {
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-form input {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #e6eef6;
+  font-size: 14px;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.auth-form button {
+  padding: 12px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: #000;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.auth-form button:hover {
+  opacity: 0.9;
+}
+
+.error-message {
+  color: var(--bad);
+  font-size: 12px;
+  margin-top: -8px;
+  text-align: center;
+}
+
+.user-info {
+  color: var(--muted);
+  font-size: 14px;
+  margin-right: 10px;
+}
 .close{position:absolute;left:12px;top:12px;background:transparent;border:none;color:var(--muted);font-size:20px}
 .padded{padding:8px 0}
 

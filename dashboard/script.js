@@ -5,12 +5,32 @@ let timer = null;
 
 const $ = id => document.getElementById(id);
 
-// base API helper
-const api = (path, opts = {}) =>
-  fetch(path, {
-    headers: { "Content-Type": "application/json" },
+// Get token from localStorage
+function getToken() {
+  return localStorage.getItem("sitelens_token") || authToken;
+}
+
+function setToken(token) {
+  authToken = token;
+  if (token) {
+    localStorage.setItem("sitelens_token", token);
+  } else {
+    localStorage.removeItem("sitelens_token");
+  }
+}
+
+// base API helper with auth
+const api = (path, opts = {}) => {
+  const token = getToken();
+  const headers = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return fetch(path, {
+    headers,
     ...opts,
   });
+};
 
 // helpers
 function formatNumber(n){ if(n===null||n===undefined) return "—"; return Number(n).toString(); }
@@ -234,6 +254,124 @@ window.stopSite = async function stopSite(ev){
   }
 };
 
+// ==================== AUTHENTICATION ====================
+
+function showLogin() {
+  $("loginForm").classList.remove("hidden");
+  $("signupForm").classList.add("hidden");
+  document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
+  event.target.classList.add("active");
+}
+
+function showSignup() {
+  $("signupForm").classList.remove("hidden");
+  $("loginForm").classList.add("hidden");
+  document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
+  event.target.classList.add("active");
+}
+
+async function handleLogin() {
+  const email = $("loginEmail").value;
+  const password = $("loginPassword").value;
+  const errorEl = $("loginError");
+
+  if (!email || !password) {
+    errorEl.textContent = "Please fill all fields";
+    return;
+  }
+
+  try {
+    const res = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || "Login failed");
+    }
+
+    setToken(data.token);
+    showDashboard(data.user);
+  } catch (err) {
+    errorEl.textContent = err.message || "Login failed";
+  }
+}
+
+async function handleSignup() {
+  const username = $("signupUsername").value;
+  const email = $("signupEmail").value;
+  const password = $("signupPassword").value;
+  const errorEl = $("signupError");
+
+  if (!username || !email || !password) {
+    errorEl.textContent = "Please fill all fields";
+    return;
+  }
+
+  if (password.length < 6) {
+    errorEl.textContent = "Password must be at least 6 characters";
+    return;
+  }
+
+  try {
+    const res = await api("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ username, email, password }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      throw new Error(data.message || "Signup failed");
+    }
+
+    setToken(data.token);
+    showDashboard(data.user);
+  } catch (err) {
+    errorEl.textContent = err.message || "Signup failed";
+  }
+}
+
+function handleLogout() {
+  setToken(null);
+  $("authModal").classList.remove("hidden");
+  $("dashboard").classList.add("hidden");
+  stopTimer();
+}
+
+function showDashboard(user) {
+  $("authModal").classList.add("hidden");
+  $("dashboard").classList.remove("hidden");
+  if (user) {
+    $("userInfo").textContent = `👤 ${user.username}`;
+  }
+  loadStats();
+  startTimer();
+}
+
+// Check if user is already logged in
+async function checkAuth() {
+  const token = getToken();
+  if (!token) {
+    $("authModal").classList.remove("hidden");
+    $("dashboard").classList.add("hidden");
+    return;
+  }
+
+  try {
+    const res = await api("/api/auth/me");
+    const data = await res.json();
+    if (data.success && data.user) {
+      showDashboard(data.user);
+    } else {
+      throw new Error("Invalid token");
+    }
+  } catch (err) {
+    setToken(null);
+    $("authModal").classList.remove("hidden");
+    $("dashboard").classList.add("hidden");
+  }
+}
+
 // startup
-loadStats();
-startTimer();
+checkAuth();

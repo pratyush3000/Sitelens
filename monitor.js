@@ -254,17 +254,22 @@ async function generateLatencyChart() {
 }
 
 // ------------------ Website monitoring ------------------
-async function monitorWebsite(site) {
+async function monitorWebsite(site, userId) {
   if (isShuttingDown) return;
   if (!site || typeof site !== "string") {
     console.error("❌ Invalid site passed to monitorWebsite:", site);
     return;
   }
+  if (!userId) {
+    console.error("❌ userId required for monitorWebsite");
+    return;
+  }
 
-  // defensive: stats object exists
-  if (!dailyStats[site]) dailyStats[site] = createEmptyStat();
+  // defensive: stats object exists (user-specific key)
+  const statsKey = `${userId}_${site}`;
+  if (!dailyStats[statsKey]) dailyStats[statsKey] = createEmptyStat();
 
-  const stat = dailyStats[site];
+  const stat = dailyStats[statsKey];
   const start = Date.now();
   let logData = {};
 
@@ -287,6 +292,7 @@ async function monitorWebsite(site) {
 
     logData = {
       website: site,
+      userId,
       messagetype: "up",
       success: true,
       statusCode: response.status,
@@ -315,6 +321,7 @@ async function monitorWebsite(site) {
 
     logData = {
       website: site,
+      userId,
       messagetype: rating === "critical" ? "down" : "warn",
       success: false,
       error: err && err.message ? err.message : String(err),
@@ -353,21 +360,28 @@ async function monitorAllWebsites() {
   const sites = await Site.find();
   for (const s of sites) {
     const site = s.website;
+    const userId = s.userId;
     if (!site || typeof site !== "string") {
       console.warn("⚠️ Skipping invalid site record:", site);
       continue;
     }
-    if (!dailyStats[site]) dailyStats[site] = createEmptyStat();
+    if (!userId) {
+      console.warn("⚠️ Skipping site without userId:", site);
+      continue;
+    }
     // run but do not await for all concurrently (we await per-site to avoid huge simultaneous load)
-    await monitorWebsite(site);
+    await monitorWebsite(site, userId);
   }
 }
 
 // ------------------ addNewWebsite API for server.js ------------------
-export async function addNewWebsite(rawUrl) {
+export async function addNewWebsite(rawUrl, userId) {
   try {
     if (!rawUrl || typeof rawUrl !== "string") {
       return { success: false, message: "Invalid URL" };
+    }
+    if (!userId) {
+      return { success: false, message: "User ID required" };
     }
     let url = rawUrl.trim();
     // normalize
@@ -380,21 +394,22 @@ export async function addNewWebsite(rawUrl) {
       return { success: false, message: "Invalid URL format" };
     }
 
-    // insert if not exists
-    const exists = await Site.findOne({ website: url });
+    // insert if not exists for this user
+    const exists = await Site.findOne({ website: url, userId });
     if (!exists) {
-      await Site.create({ website: url });
-      console.log("✅ Added site to DB:", url);
+      await Site.create({ website: url, userId });
+      console.log("✅ Added site to DB:", url, "for user:", userId);
     } else {
-      console.log("ℹ️ Site already in DB:", url);
+      console.log("ℹ️ Site already in DB for user:", url);
     }
 
-    // init in-memory stats
-    if (!dailyStats[url]) dailyStats[url] = createEmptyStat();
+    // init in-memory stats (user-specific key)
+    const statsKey = `${userId}_${url}`;
+    if (!dailyStats[statsKey]) dailyStats[statsKey] = createEmptyStat();
 
     // monitor immediately (fire and forget)
-    monitorWebsite(url).catch(err => {
-      logError(err, { site: url, operation: "immediateMonitor" }, ERROR_LEVELS.MEDIUM);
+    monitorWebsite(url, userId).catch(err => {
+      logError(err, { site: url, userId, operation: "immediateMonitor" }, ERROR_LEVELS.MEDIUM);
     });
 
     return { success: true, message: "Monitoring started", url };
@@ -405,10 +420,13 @@ export async function addNewWebsite(rawUrl) {
 }
 
 // ------------------ removeWebsite API for server.js ------------------
-export async function removeWebsite(rawUrl) {
+export async function removeWebsite(rawUrl, userId) {
   try {
     if (!rawUrl || typeof rawUrl !== "string") {
       return { success: false, message: "Invalid URL" };
+    }
+    if (!userId) {
+      return { success: false, message: "User ID required" };
     }
     // Build multiple URL variants to avoid trailing-slash / protocol mismatch
     const buildCandidates = (input) => {
@@ -443,12 +461,16 @@ export async function removeWebsite(rawUrl) {
       return { success: false, message: "Invalid URL" };
     }
 
-    // remove site records and logs using any of the candidate forms
-    const deletedSiteResult = await Site.deleteMany({ website: { $in: candidates } });
-    const logResult = await Log.deleteMany({ website: { $in: candidates } });
+    // remove site records and logs using any of the candidate forms (for this user only)
+    const deletedSiteResult = await Site.deleteMany({ website: { $in: candidates }, userId });
+    const logResult = await Log.deleteMany({ website: { $in: candidates }, userId });
 
-    // drop in-memory stats variants
-    candidates.forEach((c) => delete dailyStats[c]);
+    // drop in-memory stats variants (user-specific)
+    const statsKeyPrefix = `${userId}_`;
+    candidates.forEach((c) => {
+      delete dailyStats[`${statsKeyPrefix}${c}`];
+      delete dailyStats[c]; // fallback for old format
+    });
 
     const removedSite = deletedSiteResult?.deletedCount > 0;
     let removedLogs = logResult?.deletedCount || 0;

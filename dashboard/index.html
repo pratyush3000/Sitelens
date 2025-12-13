@@ -13,13 +13,41 @@
 </head>
 
 <body>
+    <!-- Login/Signup Modal -->
+    <div id="authModal" class="auth-modal">
+        <div class="auth-container">
+            <h2>📊 SiteLens</h2>
+            <div id="authTabs">
+                <button class="auth-tab active" onclick="showLogin()">Login</button>
+                <button class="auth-tab" onclick="showSignup()">Sign Up</button>
+            </div>
+            <div id="loginForm" class="auth-form">
+                <input type="email" id="loginEmail" placeholder="Email" required />
+                <input type="password" id="loginPassword" placeholder="Password" required />
+                <button onclick="handleLogin()">Login</button>
+                <p id="loginError" class="error-message"></p>
+            </div>
+            <div id="signupForm" class="auth-form hidden">
+                <input type="text" id="signupUsername" placeholder="Username" required />
+                <input type="email" id="signupEmail" placeholder="Email" required />
+                <input type="password" id="signupPassword" placeholder="Password (min 6 chars)" required />
+                <button onclick="handleSignup()">Sign Up</button>
+                <p id="signupError" class="error-message"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard (hidden until logged in) -->
+    <div id="dashboard" class="hidden">
     <header class="topbar">
         <div class="title">📊 SiteLens — Monitoring Dashboard</div>
         <div class="controls">
+            <span id="userInfo" class="user-info"></span>
             <label>Auto-refresh
                 <input id="autoRefreshToggle" type="checkbox" checked />
             </label>
             <button id="refreshBtn">Refresh</button>
+            <button id="logoutBtn" onclick="handleLogout()">Logout</button>
         </div>
     </header>
 
@@ -63,6 +91,7 @@
     <footer class="footer">
         <small>Last updated: <span id="lastUpdated">—</span></small>
     </footer>
+    </div>
 
     <script src="script.js"></script>
 </body>
