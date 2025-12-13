@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SiteLens — Monitoring Dashboard</title>
+
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <header class="topbar">
+        <div class="title">📊 SiteLens — Monitoring Dashboard</div>
+        <div class="controls">
+            <label>Auto-refresh
+                <input id="autoRefreshToggle" type="checkbox" checked />
+            </label>
+            <button id="refreshBtn">Refresh</button>
+        </div>
+    </header>
+
+    <div class="search-container">
+        <input id="siteInput" type="text" placeholder="Enter website URL (https://...)" />
+        <button onclick="addSite()">Start Monitoring</button>
+    </div>
+
+
+
+
+    <main class="container">
+        <section id="overview" class="overview">
+            <div class="overview-card">
+                <div class="overview-value" id="totalSites">—</div>
+                <div class="overview-label">Monitored Sites</div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-value" id="overallUptime">—</div>
+                <div class="overview-label">Average Uptime %</div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-value" id="avgLatency">—</div>
+                <div class="overview-label">Avg Response (ms)</div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-value" id="slowCount">—</div>
+                <div class="overview-label">Slow Requests</div>
+            </div>
+        </section>
+
+        <section id="cards" class="cards"></section>
+    </main>
+
+    <!-- Site details drawer -->
+    <aside id="drawer" class="drawer hidden">
+        <button id="closeDrawer" class="close">✕</button>
+        <div id="drawerContent"></div>
+    </aside>
+
+    <footer class="footer">
+        <small>Last updated: <span id="lastUpdated">—</span></small>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,37 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+error_logs.json
+monitor_logs.json
+
+# Backup files
+backup_stats_*.json
+
+# Reports and charts
+reports/
+*.pdf
+*.png
+charts/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build outputs
+dist/
+build/
+
