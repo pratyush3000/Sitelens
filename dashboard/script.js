@@ -257,19 +257,20 @@ window.stopSite = async function stopSite(ev){
 
 // ==================== AUTHENTICATION ====================
 
-function showLogin() {
+function showLogin(event) {
   $("loginForm").classList.remove("hidden");
   $("signupForm").classList.add("hidden");
   document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
   event.target.classList.add("active");
 }
 
-function showSignup() {
+function showSignup(event) {
   $("signupForm").classList.remove("hidden");
   $("loginForm").classList.add("hidden");
   document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
   event.target.classList.add("active");
 }
+
 
 async function handleLogin() {
   const email = $("loginEmail").value;
