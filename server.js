@@ -27,7 +27,14 @@ app.use(express.json());
 app.use(cors({ credentials: true, origin: true }));
 
 // Serve dashboard static files (if you have web UI in /dashboard)
+// Serve dashboard static files (if you have web UI in /dashboard)
 app.use("/dashboard", express.static("dashboard"));
+
+// Also serve the dashboard at root so GET / returns the UI (avoids 404 on '/').
+app.use(express.static(path.join(process.cwd(), "dashboard")));
+app.get("/", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "dashboard", "index.html"));
+});
 
 // ==================== AUTHENTICATION ROUTES ====================
 
