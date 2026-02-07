@@ -151,8 +151,12 @@ app.post("/collect", async (req, res) => {
 // Stats endpoint: aggregate logs per site and return computed metrics
 app.get("/stats", authenticateToken, async (req, res) => {
   try {
-    // load logs for this user only
-    const logs = await Log.find({ userId: req.userId }).sort({ timestamp: 1 }).lean();
+    // load logs for this user only (limit to recent logs for performance)
+    const limit = parseInt(req.query.limit) || 1000;
+    const logs = await Log.find({ userId: req.userId })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
 
     // group logs by site
     const grouped = {};

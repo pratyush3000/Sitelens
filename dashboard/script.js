@@ -5,33 +5,154 @@ let timer = null;
 
 const $ = id => document.getElementById(id);
 
-// Get token from localStorage
-// Get token from localStorage
+// ================= AUTH HELPERS =================
 function getToken() {
-  return localStorage.getItem("sitelens_token");
+  return localStorage.getItem("authToken");
 }
 
-function setToken(token) {
-  if (token) {
-    localStorage.setItem("sitelens_token", token);
-  } else {
-    localStorage.removeItem("sitelens_token");
-  }
-}
-
-
-// base API helper with auth
-const api = (path, opts = {}) => {
+function authHeaders() {
   const token = getToken();
-  const headers = { "Content-Type": "application/json" };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  if (!token) {
+    alert("Not logged in. Please login again.");
+    throw new Error("No auth token");
   }
-  return fetch(path, {
-    headers,
-    ...opts,
-  });
-};
+  return {
+    Authorization: `Bearer ${token}`
+  };
+}
+
+// ================= AUTH UI HANDLERS =================
+function showLogin() {
+  $("loginForm").classList.remove("hidden");
+  $("signupForm").classList.add("hidden");
+  $("authTabs").querySelector(".auth-tab.active")?.classList.remove("active");
+  document.querySelector('#authTabs button:first-child')?.classList.add("active");
+  $("loginError").textContent = "";
+  $("signupError").textContent = "";
+}
+
+function showSignup() {
+  $("signupForm").classList.remove("hidden");
+  $("loginForm").classList.add("hidden");
+  $("authTabs").querySelector(".auth-tab.active")?.classList.remove("active");
+  document.querySelector('#authTabs button:last-child')?.classList.add("active");
+  $("loginError").textContent = "";
+  $("signupError").textContent = "";
+}
+
+async function handleLogin() {
+  const email = $("loginEmail").value.trim();
+  const password = $("loginPassword").value;
+  $("loginError").textContent = "";
+  if (!email || !password) {
+    $("loginError").textContent = "Email and password required.";
+    return;
+  }
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      $("loginError").textContent = data.message || "Login failed.";
+      return;
+    }
+    localStorage.setItem("authToken", data.token);
+    if (data.user) {
+      $("userInfo").textContent = data.user.username || data.user.email;
+    }
+    // Hide modal and show dashboard
+    const modal = $("authModal");
+    const dash = $("dashboard");
+    if (modal) {
+      modal.style.display = "none";
+      modal.classList.add("hidden");
+    }
+    if (dash) {
+      dash.style.display = "block";
+      dash.classList.remove("hidden");
+    }
+    loadStats();
+    startTimer();
+  } catch (err) {
+    $("loginError").textContent = "Network error. Try again.";
+    console.error("Login error:", err);
+  }
+}
+
+async function handleSignup() {
+  const username = $("signupUsername").value.trim();
+  const email = $("signupEmail").value.trim();
+  const password = $("signupPassword").value;
+  $("signupError").textContent = "";
+  if (!username || !email || !password) {
+    $("signupError").textContent = "Username, email and password required.";
+    return;
+  }
+  if (password.length < 6) {
+    $("signupError").textContent = "Password must be at least 6 characters.";
+    return;
+  }
+  try {
+    const res = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, password })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      $("signupError").textContent = data.message || "Sign up failed.";
+      return;
+    }
+    localStorage.setItem("authToken", data.token);
+    if (data.user) {
+      $("userInfo").textContent = data.user.username || data.user.email;
+    }
+    // Hide modal and show dashboard
+    const modal = $("authModal");
+    const dash = $("dashboard");
+    if (modal) {
+      modal.style.display = "none";
+      modal.classList.add("hidden");
+    }
+    if (dash) {
+      dash.style.display = "block";
+      dash.classList.remove("hidden");
+    }
+    loadStats();
+    startTimer();
+  } catch (err) {
+    $("signupError").textContent = "Network error. Try again.";
+    console.error("Signup error:", err);
+  }
+}
+
+function handleLogout() {
+  localStorage.removeItem("authToken");
+  $("authModal").classList.remove("hidden");
+  $("dashboard").classList.add("hidden");
+  stopTimer();
+  $("loginEmail").value = "";
+  $("loginPassword").value = "";
+  $("loginError").textContent = "";
+  $("signupUsername").value = "";
+  $("signupEmail").value = "";
+  $("signupPassword").value = "";
+  $("signupError").textContent = "";
+  showLogin();
+}
+
+// Expose for onclick in HTML
+window.showLogin = showLogin;
+window.showSignup = showSignup;
+window.handleLogin = handleLogin;
+window.handleSignup = handleSignup;
+window.handleLogout = handleLogout;
+
+// =================================================
+
 
 // helpers
 function formatNumber(n){ if(n===null||n===undefined) return "—"; return Number(n).toString(); }
@@ -63,6 +184,7 @@ function renderOverview(statsObj){
 function makeCard(site, s){
   const card = document.createElement("div");
   card.className = "card";
+  card.dataset.site = site;
 
   const header = document.createElement("div");
   header.className = "row";
@@ -84,46 +206,19 @@ function makeCard(site, s){
   row3.innerHTML = `<div class="metric">Slow Req / 5xx</div><div class="value">${s.slowRequests || 0} / ${s.serverErrors || 0}</div>`;
   card.appendChild(row3);
 
-  // sparkline canvas
-  const canvas = document.createElement("canvas");
-  canvas.className = "sparkline";
-  canvas.height = 70;
-  card.appendChild(canvas);
-
-  // footer details: status codes, SSL expiry, recent downtimes
-  const footer = document.createElement("div");
-  footer.className = "card-footer small";
-  footer.innerHTML = `
-    <div>SSL: <strong>${s.sslExpiryDays ?? "N/A"}d</strong></div>
-    <div>Recent: <strong>${(s.recentDowntimes || []).slice(-3).join(", ") || "—"}</strong></div>
-    <div class="codeList">${Object.entries(s.statusCodes || {}).map(([k,v])=>`<span class="small">${k}: ${v}</span>`).join(" ")}</div>
-    <div class="actions">
-      <button class="small" data-site="${site}" onclick="openDetails(event)">Details</button>
-      <button class="small danger" data-site="${site}" onclick="stopSite(event)">Stop</button>
-    </div>
-  `;
-  card.appendChild(footer);
-
-  // draw sparkline if latencyHistory exists (we expect server to send recent latencies in lastResponseTime only; fallback)
-  const ctx = canvas.getContext("2d");
-  const latData = (s.latencyHistory || []).slice(-20).map(d => d.latency || d);
-  if(latData.length>0){
-    new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: latData.map((_,i)=>i),
-        datasets: [{ data: latData, borderWidth:1, pointRadius:0, fill:true, tension:0.3 }]
-      },
-      options: { plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}}, elements:{line:{borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,0.08)'}} }
-    });
-  } else {
-    // placeholder tiny graphic
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '12px Arial';
-    ctx.fillText('no history',10,35);
-  }
+  const actions = document.createElement("div");
+  actions.className = "row card-actions";
+  const detailsBtn = document.createElement("button");
+  detailsBtn.className = "btn-details";
+  detailsBtn.textContent = "Details";
+  detailsBtn.onclick = (e) => { e.stopPropagation(); openDetails({ currentTarget: card }); };
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "btn-remove";
+  removeBtn.textContent = "Remove";
+  removeBtn.onclick = (e) => { e.stopPropagation(); removeSite(site); };
+  actions.appendChild(detailsBtn);
+  actions.appendChild(removeBtn);
+  card.appendChild(actions);
 
   return card;
 }
@@ -133,247 +228,136 @@ window.openDetails = function(ev){
   showDrawer(site);
 };
 
-// drawer content
+// Close drawer button (bind once)
+document.addEventListener("DOMContentLoaded", () => {
+  const closeBtn = document.getElementById("closeDrawer");
+  if (closeBtn) closeBtn.onclick = () => document.getElementById("drawer").classList.add("hidden");
+});
+
+// ================= DRAWER =================
 async function showDrawer(site){
   const content = $("drawerContent");
   content.innerHTML = `<h2>${site}</h2><div class="padded small">Loading...</div>`;
   $("drawer").classList.remove("hidden");
-  // fetch expanded info from /stats (we already have it in cache)
+
   try {
-    const res = await fetch('/stats');
+    const res = await fetch('/stats', {
+      headers: authHeaders()
+    });
     const data = await res.json();
     const s = data[site];
     if(!s){ content.innerHTML = `<div class="padded">No data</div>`; return; }
+
     content.innerHTML = `
-      <h3>Metrics</h3>
-      <div class="padded">Uptime: <strong>${s.uptimePercent ?? '—'}%</strong></div>
-      <div class="padded">Average response: <strong>${s.averageResponseTime ?? '—'} ms</strong></div>
-      <div class="padded">Successes: <strong>${s.successes ?? 0}</strong> | Failures: <strong>${s.failures ?? 0}</strong></div>
-      <h3>Recent status codes</h3>
-      <div class="padded">${Object.entries(s.statusCodes||{}).map(([k,v])=>`<div>${k}: ${v}</div>`).join('') || '—'}</div>
-      <h3>Recent downtimes</h3>
-      <div class="padded">${(s.recentDowntimes||[]).slice(-10).reverse().map(t=>`<div>${t}</div>`).join('') || '—'}</div>
+      <div class="padded">Uptime: ${s.uptimePercent ?? '—'}%</div>
+      <div class="padded">Avg response: ${s.averageResponseTime ?? '—'} ms</div>
     `;
-  } catch (e){
+  } catch {
     content.innerHTML = `<div class="padded">Error loading details</div>`;
   }
 }
 
-// close drawer
-$('closeDrawer')?.addEventListener?.('click', ()=> $('drawer').classList.add('hidden'));
-
-// main refresh routine
-let lastStats = null;
+// ================= MAIN =================
 async function loadStats(){
   try {
-    const res = await fetch('/stats');
+    const res = await fetch('/stats', {
+      headers: authHeaders()
+    });
+
     if(!res.ok) throw new Error('Failed /stats');
+
     const data = await res.json();
-    lastStats = data;
-
-    // enrich: keep small latencyHistory if not present (safe fallback)
-    for(const site in data){
-      if(!data[site].latencyHistory) data[site].latencyHistory = [];
-    }
-
     renderOverview(data);
 
     const container = $('cards');
     container.innerHTML = '';
-    for(const site of Object.keys(data).sort()){
-      const card = makeCard(site, data[site]);
-      container.appendChild(card);
-    }
+    Object.keys(data).sort().forEach(site=>{
+      container.appendChild(makeCard(site, data[site]));
+    });
 
     $('lastUpdated').innerText = new Date().toLocaleString();
   } catch (err){
     console.error('Failed to load stats', err);
+    stopTimer();
   }
 }
 
-// UI controls
-$('refreshBtn').addEventListener('click', ()=> loadStats());
-$('autoRefreshToggle').addEventListener('change', (e)=>{
-  autoRefresh = e.target.checked;
-  if(autoRefresh) startTimer(); else stopTimer();
-});
+// ================= ADD SITE =================
+async function addSite() {
+  const url = $("siteInput").value.trim();
+  if (!url) return alert("Enter a valid URL");
 
-function startTimer(){ stopTimer(); timer = setInterval(()=> loadStats(), REFRESH_INTERVAL); }
+  try {
+    const res = await fetch("/api/add-site", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders()
+      },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    alert(data.message || (data.success ? "Monitoring started." : "Failed."));
+    if (data.success) loadStats();
+  } catch (err) {
+    alert("Failed to add site. Check connection.");
+    console.error(err);
+  }
+}
+
+// ================= REMOVE SITE =================
+async function removeSite(url) {
+  if (!url) return;
+  if (!confirm(`Stop monitoring "${url}"? This will remove the site and its logs.`)) return;
+  try {
+    const res = await fetch("/api/remove-site", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders()
+      },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    alert(data.message || (data.success ? "Monitoring stopped." : "Failed."));
+    if (data.success) loadStats();
+  } catch (err) {
+    alert("Failed to remove site. Check connection.");
+    console.error(err);
+  }
+}
+
+// ================= TIMER =================
+function startTimer(){ stopTimer(); timer = setInterval(loadStats, REFRESH_INTERVAL); }
 function stopTimer(){ if(timer) clearInterval(timer); timer = null; }
 
-// Add new site from the search bar (top of dashboard)
-window.addSite = async function addSite(){
-  const input = $("siteInput");
-  const raw = input.value.trim();
-  if(!raw){
-    alert("Please enter a website URL");
-    return;
-  }
-
-  try {
-    const res = await api("/api/add-site", {
-      method: "POST",
-      body: JSON.stringify({ url: raw }),
-    });
-    const data = await res.json();
-    if(!res.ok || !data.success){
-      throw new Error(data.message || "Failed to add site");
-    }
-    // refresh metrics immediately so the new site shows up
-    await loadStats();
-    input.value = "";
-  } catch (err){
-    console.error("Failed to add site", err);
-    alert(err.message || "Unable to add site. Check the URL and try again.");
-  }
-};
-
-// allow pressing Enter in the input to trigger addSite
-$("siteInput")?.addEventListener?.("keyup", (e)=>{
-  if(e.key === "Enter") addSite();
-});
-
-// Stop monitoring a site (from card button)
-window.stopSite = async function stopSite(ev){
-  const site = ev.currentTarget.dataset.site;
-  if(!site) return;
-  if(!confirm(`Stop monitoring ${site}?`)) return;
-
-  try {
-    const res = await api("/api/remove-site", {
-      method: "POST",
-      body: JSON.stringify({ url: site }),
-    });
-    const data = await res.json();
-    if(!res.ok || !data.success){
-      throw new Error(data.message || "Failed to remove site");
-    }
-    await loadStats();
-  } catch (err){
-    console.error("Failed to remove site", err);
-    alert(err.message || "Unable to remove site.");
-  }
-};
-
-// ==================== AUTHENTICATION ====================
-
-function showLogin(event) {
-  $("loginForm").classList.remove("hidden");
-  $("signupForm").classList.add("hidden");
-  document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
-  event.target.classList.add("active");
-}
-
-function showSignup(event) {
-  $("signupForm").classList.remove("hidden");
-  $("loginForm").classList.add("hidden");
-  document.querySelectorAll(".auth-tab").forEach(t => t.classList.remove("active"));
-  event.target.classList.add("active");
-}
-
-
-async function handleLogin() {
-  const email = $("loginEmail").value;
-  const password = $("loginPassword").value;
-  const errorEl = $("loginError");
-
-  if (!email || !password) {
-    errorEl.textContent = "Please fill all fields";
-    return;
-  }
-
-  try {
-    const res = await api("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || "Login failed");
-    }
-
-    setToken(data.token);
-    showDashboard(data.user);
-  } catch (err) {
-    errorEl.textContent = err.message || "Login failed";
-  }
-}
-
-async function handleSignup() {
-  const username = $("signupUsername").value;
-  const email = $("signupEmail").value;
-  const password = $("signupPassword").value;
-  const errorEl = $("signupError");
-
-  if (!username || !email || !password) {
-    errorEl.textContent = "Please fill all fields";
-    return;
-  }
-
-  if (password.length < 6) {
-    errorEl.textContent = "Password must be at least 6 characters";
-    return;
-  }
-
-  try {
-    const res = await api("/api/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ username, email, password }),
-    });
-    const data = await res.json();
-
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || "Signup failed");
-    }
-
-    setToken(data.token);
-    showDashboard(data.user);
-  } catch (err) {
-    errorEl.textContent = err.message || "Signup failed";
-  }
-}
-
-function handleLogout() {
-  setToken(null);
-  $("authModal").classList.remove("hidden");
-  $("dashboard").classList.add("hidden");
-  stopTimer();
-}
-
-function showDashboard(user) {
-  $("authModal").classList.add("hidden");
-  $("dashboard").classList.remove("hidden");
-  if (user) {
-    $("userInfo").textContent = `👤 ${user.username}`;
-  }
-  loadStats();
-  startTimer();
-}
-
-// Check if user is already logged in
-async function checkAuth() {
+// ================= STARTUP (auth check) =================
+async function initApp() {
   const token = getToken();
   if (!token) {
     $("authModal").classList.remove("hidden");
     $("dashboard").classList.add("hidden");
     return;
   }
-
   try {
-    const res = await api("/api/auth/me");
+    const res = await fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
-    if (data.success && data.user) {
-      showDashboard(data.user);
+    if (res.ok && data.success && data.user) {
+      $("userInfo").textContent = data.user.username || data.user.email;
+      $("authModal").classList.add("hidden");
+      $("dashboard").classList.remove("hidden");
+      loadStats();
+      startTimer();
     } else {
-      throw new Error("Invalid token");
+      localStorage.removeItem("authToken");
+      $("authModal").classList.remove("hidden");
+      $("dashboard").classList.add("hidden");
     }
-  } catch (err) {
-    setToken(null);
+  } catch {
+    localStorage.removeItem("authToken");
     $("authModal").classList.remove("hidden");
     $("dashboard").classList.add("hidden");
   }
 }
 
-// startup
-checkAuth();
+initApp();

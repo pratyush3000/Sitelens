@@ -37,6 +37,11 @@ html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-
 
 .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);display:flex;flex-direction:column;gap:8px}
 .card h3{margin:0;font-size:16px}
+.card-actions{display:flex;gap:8px;margin-top:6px}
+.card-actions .btn-details,.card-actions .btn-remove{padding:6px 12px;border-radius:8px;border:none;font-size:13px;cursor:pointer}
+.card-actions .btn-details{background:var(--accent);color:#022}
+.card-actions .btn-remove{background:rgba(239,68,68,0.2);color:var(--bad);border:1px solid rgba(239,68,68,0.4)}
+.card-actions .btn-remove:hover{background:rgba(239,68,68,0.35)}
 .row{display:flex;justify-content:space-between;align-items:center}
 .metric{font-size:13px;color:var(--muted)}
 .value{font-weight:700}
