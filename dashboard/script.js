@@ -206,6 +206,11 @@ function makeCard(site, s){
   row3.innerHTML = `<div class="metric">Slow Req / 5xx</div><div class="value">${s.slowRequests || 0} / ${s.serverErrors || 0}</div>`;
   card.appendChild(row3);
 
+  const row4 = document.createElement("div");
+  row4.className = "row";
+  row4.innerHTML = `<div class="metric">DNS Time</div><div class="value">${s.avgDnsTime !== null && s.avgDnsTime !== undefined ? s.avgDnsTime + ' ms' : "Calculating..."}</div>`;
+  card.appendChild(row4);
+
   const actions = document.createElement("div");
   actions.className = "row card-actions";
   const detailsBtn = document.createElement("button");
@@ -251,6 +256,8 @@ async function showDrawer(site){
     content.innerHTML = `
       <div class="padded">Uptime: ${s.uptimePercent ?? '—'}%</div>
       <div class="padded">Avg response: ${s.averageResponseTime ?? '—'} ms</div>
+      <div class="padded">DNS Time: ${s.avgDnsTime ?? '—'} ms</div>
+      <div class="padded">SSL Expiry: ${s.sslExpiryDays ?? '—'} days</div>
     `;
   } catch {
     content.innerHTML = `<div class="padded">Error loading details</div>`;

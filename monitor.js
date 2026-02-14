@@ -5,6 +5,7 @@ import sslChecker from "ssl-checker";
 import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
+import dns from "dns";
 
 import { connectDB } from "./db.js";
 import Log from "./models/Log.js";
@@ -223,6 +224,7 @@ function evaluateResponse({ responseTime = 0, statusCode = 0 }) {
 
 // ---------------- Latency chart generation (unchanged) ----------------
 import { ChartJSNodeCanvas } from "chartjs-node-canvas";
+import { hostname } from "os";
 async function generateLatencyChart() {
   try {
     const chartJSNodeCanvas = new ChartJSNodeCanvas({ width: 800, height: 400 });
@@ -274,7 +276,17 @@ async function monitorWebsite(site, userId) {
   let logData = {};
 
   try {
-    const response = await retryOperation(() => axios.get(site, { timeout: MONITORING_CONFIG.requestTimeout }), 2, 1000);
+    const response = await retryOperation(() => axios.get(site, { 
+      timeout: MONITORING_CONFIG.requestTimeout,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      }
+    }), 2, 1000);
     const respTime = Date.now() - start;
     const rating = evaluateResponse({ responseTime: respTime, statusCode: response.status });
 
@@ -338,14 +350,30 @@ async function monitorWebsite(site, userId) {
     }
   }
 
+  // Measure DNS resolution time
+  let dnsResolutionTime = null;
+  try {
+    const dnsStart = performance.now();
+    const siteUrl = new URL(site);
+    await dns.promises.resolve(siteUrl.hostname);
+    dnsResolutionTime = performance.now() - dnsStart;
+    console.log(`📍 DNS Time for ${site}: ${dnsResolutionTime.toFixed(2)}ms`);
+    logData.dnsResolutionTime = dnsResolutionTime;
+    console.log(`✅ Added DNS to logData:`, logData.dnsResolutionTime);
+  } catch (dnsErr) {
+    logError(dnsErr, { site, operation: "DNS resolution" }, ERROR_LEVELS.LOW);
+  }
+
   // ------------------ Save log to MongoDB ------------------
   try {
     // ensure website exists for validation
     if (!logData.website) {
       logError(new Error("Missing website in logData"), { site, logData }, ERROR_LEVELS.MEDIUM);
     } else {
+      console.log(`💾 Saving log with dnsResolutionTime:`, logData.dnsResolutionTime);
       const logEntry = new Log(logData);
       await logEntry.save();
+      console.log(`✅ Log saved to MongoDB with DNS:`, logEntry.dnsResolutionTime);
     }
   } catch (e) {
     logError(e, { site, operation: "MongoDB log save" }, ERROR_LEVELS.MEDIUM);

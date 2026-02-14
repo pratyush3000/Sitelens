@@ -10,7 +10,9 @@ const logSchema = new mongoose.Schema({
   rating: { type: String },
   sslExpiryDays: { type: Number },
   error: { type: String },
-  timestamp: { type: Date, default: Date.now }
+  timestamp: { type: Date, default: Date.now },
+  dnsResolutionTime: { type: Number }
+
 });
 
 // Index for efficient queries

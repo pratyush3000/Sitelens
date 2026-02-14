@@ -187,7 +187,8 @@ app.get("/stats", authenticateToken, async (req, res) => {
         sslExpiryDays: null,
         latencyHistory: [],
         statusCodes: {},
-        downtimeTimestamps: []
+        downtimeTimestamps: [],
+        dnsResolutionTimes: []
       };
 
       let lastDownTime = null;
@@ -216,7 +217,12 @@ app.get("/stats", authenticateToken, async (req, res) => {
           stats.statusCodes[log.statusCode] = (stats.statusCodes[log.statusCode] || 0) + 1;
           if (log.statusCode >= 500) stats.serverErrors++;
         }
-        if (log.sslExpiryDays !== undefined && log.sslExpiryDays !== null) stats.sslExpiryDays = log.sslExpiryDays;
+        if (log.sslExpiryDays !== undefined && log.sslExpiryDays !== null) {
+          stats.sslExpiryDays = log.sslExpiryDays;
+        }
+        if (typeof log.dnsResolutionTime === "number") {
+          stats.dnsResolutionTimes.push(log.dnsResolutionTime);
+        }
       }
       return stats;
     }
@@ -248,7 +254,10 @@ app.get("/stats", authenticateToken, async (req, res) => {
         statusCodes: stats.statusCodes,
         recentDowntimes: stats.downtimeTimestamps.slice(-5),
         latencyHistory: stats.latencyHistory.slice(-50), // send some history for sparklines
-        lastRating
+        lastRating,
+        avgDnsTime: stats.dnsResolutionTimes.length>0 
+        ? Math.round(stats.dnsResolutionTimes.reduce((a, b) => a + b, 0) / stats.dnsResolutionTimes.length)
+        : null
       };
     }
 

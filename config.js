@@ -2,9 +2,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Website monitoring configuration
-export const WEBSITES = [
-  "",
-];
+export const WEBSITES = [];
+
 
 // Monitoring settings
 export const MONITORING_CONFIG = {
@@ -19,7 +18,7 @@ export const MONITORING_CONFIG = {
   
   // Daily report time (24-hour format)
   reportHour: parseInt(process.env.REPORT_HOUR) || 21,
-  reportMinute: parseInt(process.env.REPORT_MINUTE) ||  13,
+  reportMinute: parseInt(process.env.REPORT_MINUTE) || 13 ,
   
   // Server settings
   serverPort: parseInt(process.env.PORT) || 3000,
