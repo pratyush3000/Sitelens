@@ -212,11 +212,7 @@ Visit `http://localhost:3000` in your browser, sign up and start monitoring!
 - [ ] Slack / webhook alerts
 - [ ] Multi-location monitoring
 
----
-
-## 📄 License
-
-MIT License — free to use, modify and distribute.
+  
 
 ---
 
