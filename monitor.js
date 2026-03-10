@@ -216,8 +216,10 @@ async function checkSSL(site) {
 // ---------------- Response rating ----------------
 function evaluateResponse({ responseTime = 0, statusCode = 0 }) {
   const { excellent, acceptable, concerning } = PERFORMANCE_THRESHOLDS;
-  if (statusCode >= 500 || responseTime > concerning.maxResponseTime) return "critical";
-  if (statusCode >= 400 || responseTime > acceptable.maxResponseTime) return "concerning";
+  if (statusCode >= 500) return "critical";
+  if (statusCode >= 400) return "concerning";
+  if (responseTime > concerning.maxResponseTime) return "concerning"; // slow but up
+  if (responseTime > acceptable.maxResponseTime) return "acceptable";
   if (responseTime > excellent.maxResponseTime) return "acceptable";
   return "excellent";
 }
@@ -275,18 +277,42 @@ async function monitorWebsite(site, userId) {
   const start = Date.now();
   let logData = {};
 
+// Shared headers for all requests
+  const REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Encoding': 'gzip, deflate',
+    'Connection': 'keep-alive',
+  };
+
+  // Hard cap timeout at 10 seconds regardless of config
+  const TIMEOUT = Math.min(MONITORING_CONFIG.requestTimeout || 10000, 10000);
+
+  // Helper: classify error into meaningful categories
+  function classifyError(err, statusCode) {
+    const msg = (err?.message || "").toLowerCase();
+    if (statusCode === 403 || statusCode === 401) return "blocked";
+    if (msg.includes("timeout") || err?.code === "ECONNABORTED") return "timeout";
+    if (statusCode >= 500) return "server_error";
+    if (msg.includes("dns") || msg.includes("enotfound") || msg.includes("econnrefused")) return "down";
+    return "down";
+  }
+
   try {
-    const response = await retryOperation(() => axios.get(site, { 
-      timeout: MONITORING_CONFIG.requestTimeout,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-      }
-    }), 2, 1000);
+    let response = null;
+
+    // Step 1: Try HEAD request first (lightweight, no body)
+    try {
+      response = await axios.head(site, { timeout: TIMEOUT, headers: REQUEST_HEADERS });
+      console.log(`✅ HEAD succeeded for ${site} → ${response.status}`);
+    } catch (headErr) {
+      // Step 2: HEAD failed — fall back to GET
+      console.log(`⚠️ HEAD failed for ${site}, trying GET...`);
+      response = await axios.get(site, { timeout: TIMEOUT, headers: REQUEST_HEADERS });
+      console.log(`✅ GET succeeded for ${site} → ${response.status}`);
+    }
+
     const respTime = Date.now() - start;
     const rating = evaluateResponse({ responseTime: respTime, statusCode: response.status });
 
@@ -314,39 +340,66 @@ async function monitorWebsite(site, userId) {
       timestamp: new Date().toISOString(),
     };
     console.log(`🚦 ${site} → ${rating.toUpperCase()} (${respTime}ms, code ${response.status})`);
+
   } catch (err) {
     const respTime = Date.now() - start;
     const ts = new Date().toISOString();
     stat.totalChecks++;
     stat.failures++;
 
-    let rating = "critical";
-    let label = "DOWN";
-    const msg = (err && err.message ? err.message : "").toLowerCase();
-    if (msg.includes("timeout") || msg.includes("403") || msg.includes("forbidden") || msg.includes("network") || msg.includes("dns")) {
+    // Classify the error properly
+    const statusCode = err?.response?.status || null;
+    const errorType = classifyError(err, statusCode);
+
+    // "blocked" = site is up but rejecting our server → don't count as downtime
+    const isBlocked = errorType === "blocked";
+    const isDown = errorType === "down";
+
+    let rating, label, messagetype;
+    if (isBlocked) {
+      rating = "acceptable";
+      label = "BLOCKED (site is up, rejecting monitor)";
+      messagetype = "up"; // treat as up — site is reachable
+      stat.successes++;   // count as success so uptime isn't penalised
+      stat.failures--;    // undo the failure we just incremented
+    } else if (errorType === "timeout") {
       rating = "concerning";
-      label = "POSSIBLE ISSUE";
+      label = "TIMEOUT";
+      messagetype = "warn";
+      stat.downtimeEvents++;
+      stat.downtimeTimestamps.push(ts);
+    } else {
+      rating = "critical";
+      label = "DOWN";
+      messagetype = "down";
+      stat.downtimeEvents++;
+      stat.downtimeTimestamps.push(ts);
     }
-    if (rating === "critical") stat.downtimeEvents++;
-    stat.downtimeTimestamps.push(ts);
+
     stat.lastRating = rating;
 
     logData = {
       website: site,
       userId,
-      messagetype: rating === "critical" ? "down" : "warn",
-      success: false,
-      error: err && err.message ? err.message : String(err),
+      messagetype,
+      success: isBlocked, // blocked = technically up
+      error: err?.message || String(err),
+      errorType,
+      statusCode,
       responseTime: respTime,
       rating,
       timestamp: ts,
     };
 
-    console.error(`[${label}] ${site}: ${err && err.message ? err.message : err}`);
-    logError(err, { site, responseTime: respTime, rating, label }, rating === "critical" ? ERROR_LEVELS.HIGH : ERROR_LEVELS.MEDIUM);
+    console.error(`[${label}] ${site}: ${err?.message || err}`);
+    logError(err, { site, responseTime: respTime, rating, label, errorType }, isDown ? ERROR_LEVELS.HIGH : ERROR_LEVELS.MEDIUM);
 
-    if (rating === "critical") {
-      await sendEmail(`🚨 Website Down Alert: ${site}`, `ALERT: ${site} is DOWN.\nTime: ${ts}\nError: ${err && err.message ? err.message : err}\nResponse time: ${respTime}ms`);
+    // Only send alert for truly down sites, not blocked/timeout
+    if (errorType === "down") {
+      await sendEmail(
+        `🚨 Website Down Alert: ${site}`,
+        `ALERT: ${site} is DOWN.\nTime: ${ts}\nError: ${err?.message || err}\nResponse time: ${respTime}ms`
+      );
     }
   }
 
@@ -402,7 +455,26 @@ async function monitorAllWebsites() {
   }
 }
 
-// ------------------ addNewWebsite API for server.js ------------------
+// ------------------ URL normalizer ------------------
+function normalizeUrl(rawUrl) {
+  let url = rawUrl.trim().toLowerCase();
+
+  // add https:// if missing
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+  try {
+    const parsed = new URL(url);
+
+    // remove trailing slash from pathname (only if it's just "/")
+    if (parsed.pathname === "/") parsed.pathname = "";
+
+    // rebuild clean URL: protocol + hostname + pathname only (drop query/hash)
+    return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return null; // invalid URL
+  }
+}
+
 export async function addNewWebsite(rawUrl, userId) {
   try {
     if (!rawUrl || typeof rawUrl !== "string") {
@@ -411,16 +483,12 @@ export async function addNewWebsite(rawUrl, userId) {
     if (!userId) {
       return { success: false, message: "User ID required" };
     }
-    let url = rawUrl.trim();
-    // normalize
-    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
 
-    // validation: try creating URL object
-    try {
-      new URL(url);
-    } catch (err) {
-      return { success: false, message: "Invalid URL format" };
-    }
+    // normalize URL before anything else
+    const url = normalizeUrl(rawUrl);
+    if (!url) return { success: false, message: "Invalid URL format" };
+
+    console.log(`🔗 Normalized URL: "${rawUrl.trim()}" → "${url}"`);
 
     // insert if not exists for this user
     const exists = await Site.findOne({ website: url, userId });

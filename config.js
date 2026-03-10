@@ -40,9 +40,9 @@ export const EMAIL_CONFIG = {
 
 // Performance thresholds for rating system
 export const PERFORMANCE_THRESHOLDS = {
-  excellent: { maxResponseTime: 300, maxStatusCode: 299 },
-  acceptable: { maxResponseTime: 800, maxStatusCode: 399 },
-  concerning: { maxResponseTime: 1500, maxStatusCode: 499 },
+  excellent: { maxResponseTime: 800, maxStatusCode: 299 },
+  acceptable: { maxResponseTime: 2000, maxStatusCode: 399 },
+  concerning: { maxResponseTime: 5000, maxStatusCode: 499 },
   critical: { maxResponseTime: Infinity, maxStatusCode: Infinity }
 };
 

@@ -237,30 +237,105 @@ window.openDetails = function(ev){
 document.addEventListener("DOMContentLoaded", () => {
   const closeBtn = document.getElementById("closeDrawer");
   if (closeBtn) closeBtn.onclick = () => document.getElementById("drawer").classList.add("hidden");
+
+  const visibilityBtn = document.getElementById("checkVisibilityBtn");
+  if (visibilityBtn) visibilityBtn.onclick = checkVisibility;
 });
 
-// ================= DRAWER =================
+
+
+
+let activeChart = null; // track chart instance to destroy before re-rendering
+
 async function showDrawer(site){
   const content = $("drawerContent");
   content.innerHTML = `<h2>${site}</h2><div class="padded small">Loading...</div>`;
   $("drawer").classList.remove("hidden");
 
   try {
-    const res = await fetch('/stats', {
-      headers: authHeaders()
-    });
+    const res = await fetch('/stats', { headers: authHeaders() });
     const data = await res.json();
     const s = data[site];
     if(!s){ content.innerHTML = `<div class="padded">No data</div>`; return; }
 
+    // SSL warning badge
+    const sslWarning = s.sslExpiryDays !== null && s.sslExpiryDays <= 30
+      ? `<span class="badge bad">⚠️ SSL expires in ${s.sslExpiryDays} days</span>`
+      : `<span class="badge good">🔒 SSL valid (${s.sslExpiryDays ?? '—'} days)</span>`;
+
     content.innerHTML = `
-      <div class="padded">Uptime: ${s.uptimePercent ?? '—'}%</div>
-      <div class="padded">Avg response: ${s.averageResponseTime ?? '—'} ms</div>
-      <div class="padded">DNS Time: ${s.avgDnsTime ?? '—'} ms</div>
-      <div class="padded">SSL Expiry: ${s.sslExpiryDays ?? '—'} days</div>
+      <div class="drawer-stats-grid">
+        <div class="drawer-stat"><div class="drawer-stat-label">Uptime</div><div class="drawer-stat-value">${s.uptimePercent ?? '—'}%</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">Avg Response</div><div class="drawer-stat-value">${s.averageResponseTime ?? '—'} ms</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">DNS Time</div><div class="drawer-stat-value">${s.avgDnsTime ?? '—'} ms</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">SSL</div><div class="drawer-stat-value">${sslWarning}</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">Min / Max</div><div class="drawer-stat-value">${s.minResponseTime ?? '—'} / ${s.maxResponseTime ?? '—'} ms</div></div>
+        <div class="drawer-stat"><div class="drawer-stat-label">Server Errors</div><div class="drawer-stat-value">${s.serverErrors || 0}</div></div>
+      </div>
+
+      <div class="chart-section">
+        <h3>Response Time Trend</h3>
+        <div class="chart-wrapper">
+          <canvas id="latencyChart"></canvas>
+        </div>
+      </div>
     `;
-  } catch {
+
+    // destroy previous chart if exists
+    if(activeChart) { activeChart.destroy(); activeChart = null; }
+
+    // build chart data from latencyHistory
+    const history = s.latencyHistory || [];
+    const labels = history.map((p, i) => {
+      const d = new Date(p.time);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    });
+    const values = history.map(p => p.latency);
+
+    const ctx = document.getElementById("latencyChart").getContext("2d");
+    activeChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Response Time (ms)",
+          data: values,
+          borderColor: "#6366f1",
+          backgroundColor: "rgba(99,102,241,0.1)",
+          borderWidth: 2,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          fill: true,
+          tension: 0.4
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.parsed.y} ms`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 8, color: "#9ca3af" },
+            grid: { color: "rgba(255,255,255,0.05)" }
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { color: "#9ca3af", callback: v => v + " ms" },
+            grid: { color: "rgba(255,255,255,0.05)" }
+          }
+        }
+      }
+    });
+
+  } catch(e) {
     content.innerHTML = `<div class="padded">Error loading details</div>`;
+    console.error(e);
   }
 }
 
@@ -368,3 +443,74 @@ async function initApp() {
 }
 
 initApp();
+
+// ================= AI SEARCH VISIBILITY =================
+window.checkVisibility = async function() {
+  const brandName = $("brandInput").value.trim();
+  const keyword = $("keywordInput").value.trim();
+  const resultsDiv = $("aiResults");
+
+  if (!brandName || !keyword) {
+    alert("Please enter both a brand name and a keyword.");
+    return;
+  }
+
+  // Show loading state
+  resultsDiv.innerHTML = `
+    <div class="ai-result-card loading">
+      <div class="ai-checking">⏳ Asking Gemini about "${keyword}"...</div>
+    </div>
+  `;
+
+  try {
+    const res = await fetch("/api/ai-visibility", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders()
+      },
+      body: JSON.stringify({ brandName, keyword })
+    });
+
+    const data = await res.json();
+
+    if (!data.success) {
+      resultsDiv.innerHTML = `<div class="ai-result-card error">❌ ${data.message}</div>`;
+      return;
+    }
+
+    const isVisible = data.status === "VISIBLE";
+    const checkedAt = new Date(data.checkedAt).toLocaleString();
+
+    // Prepend new result so latest is always on top
+    const card = document.createElement("div");
+    card.className = `ai-result-card ${isVisible ? "visible" : "hidden-result"}`;
+    card.innerHTML = `
+      <div class="ai-result-header">
+        <span class="ai-brand">${data.brandName}</span>
+        <span class="ai-badge ${isVisible ? "badge good" : "badge bad"}">
+          ${isVisible ? "✅ VISIBLE" : "❌ HIDDEN"}
+        </span>
+      </div>
+      <div class="ai-keyword">🔍 Keyword: "${data.keyword}"</div>
+      <div class="ai-snippet">${isVisible ? `💬 "${data.mentionSnippet}"` : "Your brand was not mentioned in the AI response."}</div>
+      <div class="ai-time">🕐 Checked at ${checkedAt}</div>
+      <details class="ai-raw">
+        <summary>See full AI response</summary>
+        <div class="ai-raw-content">${data.rawResponse}</div>
+      </details>
+    `;
+
+    // Clear loading and add result
+    if (resultsDiv.querySelector(".loading")) {
+      resultsDiv.innerHTML = "";
+    }
+    resultsDiv.insertBefore(card, resultsDiv.firstChild);
+
+  } catch (err) {
+    resultsDiv.innerHTML = `<div class="ai-result-card error">❌ Network error. Try again.</div>`;
+    console.error(err);
+  }
+};
+
+

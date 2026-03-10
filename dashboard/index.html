@@ -39,58 +39,69 @@
 
     <!-- Main Dashboard (hidden until logged in) -->
     <div id="dashboard" class="hidden">
-    <header class="topbar">
-        <div class="title">📊 SiteLens — Monitoring Dashboard</div>
-        <div class="controls">
-            <span id="userInfo" class="user-info"></span>
-            <label>Auto-refresh
-                <input id="autoRefreshToggle" type="checkbox" checked />
-            </label>
-            <button id="refreshBtn">Refresh</button>
-            <button id="logoutBtn" onclick="handleLogout()">Logout</button>
+        <header class="topbar">
+            <div class="title">📊 SiteLens — Monitoring Dashboard</div>
+            <div class="controls">
+                <span id="userInfo" class="user-info"></span>
+                <label>Auto-refresh
+                    <input id="autoRefreshToggle" type="checkbox" checked />
+                </label>
+                <button id="refreshBtn">Refresh</button>
+                <button id="logoutBtn" onclick="handleLogout()">Logout</button>
+            </div>
+        </header>
+
+        <div class="search-container">
+            <input id="siteInput" type="text" placeholder="Enter website URL (https://...)" />
+            <button onclick="addSite()">Start Monitoring</button>
         </div>
-    </header>
-
-    <div class="search-container">
-        <input id="siteInput" type="text" placeholder="Enter website URL (https://...)" />
-        <button onclick="addSite()">Start Monitoring</button>
-    </div>
 
 
 
 
-    <main class="container">
-        <section id="overview" class="overview">
-            <div class="overview-card">
-                <div class="overview-value" id="totalSites">—</div>
-                <div class="overview-label">Monitored Sites</div>
-            </div>
-            <div class="overview-card">
-                <div class="overview-value" id="overallUptime">—</div>
-                <div class="overview-label">Average Uptime %</div>
-            </div>
-            <div class="overview-card">
-                <div class="overview-value" id="avgLatency">—</div>
-                <div class="overview-label">Avg Response (ms)</div>
-            </div>
-            <div class="overview-card">
-                <div class="overview-value" id="slowCount">—</div>
-                <div class="overview-label">Slow Requests</div>
-            </div>
-        </section>
+        <main class="container">
+            <section id="overview" class="overview">
+                <div class="overview-card">
+                    <div class="overview-value" id="totalSites">—</div>
+                    <div class="overview-label">Monitored Sites</div>
+                </div>
+                <div class="overview-card">
+                    <div class="overview-value" id="overallUptime">—</div>
+                    <div class="overview-label">Average Uptime %</div>
+                </div>
+                <div class="overview-card">
+                    <div class="overview-value" id="avgLatency">—</div>
+                    <div class="overview-label">Avg Response (ms)</div>
+                </div>
+                <div class="overview-card">
+                    <div class="overview-value" id="slowCount">—</div>
+                    <div class="overview-label">Slow Requests</div>
+                </div>
+            </section>
 
-        <section id="cards" class="cards"></section>
-    </main>
+            <section id="cards" class="cards"></section>
+            <!-- AI Search Visibility Section -->
+            <section id="aiVisibility" class="ai-visibility-section">
+                <h2>🤖 AI Search Visibility</h2>
+                <p class="ai-subtitle">Check if your brand appears when AI recommends products or services</p>
+                <div class="ai-input-row">
+                    <input id="brandInput" type="text" placeholder="Brand name (e.g. Netflix)" />
+                    <input id="keywordInput" type="text" placeholder="Keyword (e.g. best streaming service)" />
+                    <button id="checkVisibilityBtn">Check Visibility</button>
+                </div>
+                <div id="aiResults" class="ai-results"></div>
+            </section>
+        </main>
 
-    <!-- Site details drawer -->
-    <aside id="drawer" class="drawer hidden">
-        <button id="closeDrawer" class="close">✕</button>
-        <div id="drawerContent"></div>
-    </aside>
+        <!-- Site details drawer -->
+        <aside id="drawer" class="drawer hidden">
+            <button id="closeDrawer" class="close">✕</button>
+            <div id="drawerContent"></div>
+        </aside>
 
-    <footer class="footer">
-        <small>Last updated: <span id="lastUpdated">—</span></small>
-    </footer>
+        <footer class="footer">
+            <small>Last updated: <span id="lastUpdated">—</span></small>
+        </footer>
     </div>
 
     <script src="script.js"></script>

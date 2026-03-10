@@ -42,7 +42,7 @@ app.get("/", (req, res) => {
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    
+
     if (!username || !email || !password) {
       return res.status(400).json({ success: false, message: "Username, email, and password are required" });
     }
@@ -61,8 +61,8 @@ app.post("/api/auth/signup", async (req, res) => {
     const user = await User.create({ username, email, password });
     const token = generateToken(user._id);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "User created successfully",
       token,
       user: { id: user._id, username: user.username, email: user.email }
@@ -77,7 +77,7 @@ app.post("/api/auth/signup", async (req, res) => {
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    
+
     if (!email || !password) {
       return res.status(400).json({ success: false, message: "Email and password are required" });
     }
@@ -96,8 +96,8 @@ app.post("/api/auth/login", async (req, res) => {
 
     const token = generateToken(user._id);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "Login successful",
       token,
       user: { id: user._id, username: user.username, email: user.email }
@@ -255,9 +255,9 @@ app.get("/stats", authenticateToken, async (req, res) => {
         recentDowntimes: stats.downtimeTimestamps.slice(-5),
         latencyHistory: stats.latencyHistory.slice(-50), // send some history for sparklines
         lastRating,
-        avgDnsTime: stats.dnsResolutionTimes.length>0 
-        ? Math.round(stats.dnsResolutionTimes.reduce((a, b) => a + b, 0) / stats.dnsResolutionTimes.length)
-        : null
+        avgDnsTime: stats.dnsResolutionTimes.length > 0
+          ? Math.round(stats.dnsResolutionTimes.reduce((a, b) => a + b, 0) / stats.dnsResolutionTimes.length)
+          : null
       };
     }
 
@@ -318,6 +318,87 @@ app.post("/cleanup", async (req, res) => {
   } catch (error) {
     logError(error, { operation: "manualCleanup" }, ERROR_LEVELS.MEDIUM);
     res.status(500).json({ error: "Cleanup failed" });
+  }
+});
+
+// ==================== AI SEARCH VISIBILITY ====================
+app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
+  try {
+    const { brandName, keyword } = req.body;
+
+    if (!brandName || !keyword) {
+      return res.status(400).json({
+        success: false,
+        message: "brandName and keyword are required"
+      });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        message: "Gemini API key not configured"
+      });
+    }
+
+    // Build the prompt
+    const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a list of 5 top recommendations with a brief reason for each.`;
+
+    // Call Gemini API
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      }
+    );
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error("Gemini API error:", errText);
+      return res.status(500).json({
+        success: false,
+        message: "Gemini API call failed"
+      });
+    }
+
+    const geminiData = await geminiRes.json();
+    const aiResponse = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    // Check if brand is mentioned
+    const isVisible = aiResponse.toLowerCase().includes(brandName.toLowerCase());
+
+    // Extract the sentence where brand is mentioned
+    let mentionSnippet = "Not mentioned";
+    if (isVisible) {
+      const sentences = aiResponse.split(/[.\n]/);
+      const matchingSentence = sentences.find(s =>
+        s.toLowerCase().includes(brandName.toLowerCase())
+      );
+      mentionSnippet = matchingSentence?.trim() || "Mentioned in response";
+    }
+
+    console.log(`🤖 AI Visibility check — Brand: "${brandName}", Keyword: "${keyword}", Status: ${isVisible ? "VISIBLE" : "HIDDEN"}`);
+
+    res.json({
+      success: true,
+      brandName,
+      keyword,
+      status: isVisible ? "VISIBLE" : "HIDDEN",
+      mentionSnippet,
+      rawResponse: aiResponse,
+      checkedAt: new Date().toISOString()
+    });
+
+  } catch (err) {
+    console.error("AI visibility error:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "AI visibility check failed"
+    });
   }
 });
 
