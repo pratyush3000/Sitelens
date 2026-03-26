@@ -90,6 +90,38 @@
                     <button id="checkVisibilityBtn">Check Visibility</button>
                 </div>
                 <div id="aiResults" class="ai-results"></div>
+
+                <!-- Auto-monitor management -->
+                <div class="ai-monitors-section">
+                    <h3>⏰ Auto-Monitor (Daily Checks)</h3>
+                    <p class="ai-subtitle">Save brand+keyword pairs to check automatically every 24 hours</p>
+                    <div class="ai-input-row">
+                        <input id="monitorBrandInput" type="text" placeholder="Brand name (e.g. Amazon Prime)" />
+                        <input id="monitorAliasInput" type="text"
+                            placeholder="Aliases, comma separated (e.g. Prime Video, Prime)" />
+                        <input id="monitorKeywordInput" type="text"
+                            placeholder="Keyword (e.g. best streaming service)" />
+                        <button id="saveMonitorBtn">Save Monitor</button>
+                    </div>
+                    <div id="monitorsList"></div>
+                </div>
+
+                <!-- Trend Chart -->
+                <div class="ai-trend-section hidden" id="aiTrendSection">
+                    <div class="ai-trend-header">
+                        <h3>📈 Rank Trend: <span id="aiTrendTitle"></span></h3>
+                        <button id="closeTrendBtn">✕ Close</button>
+                    </div>
+                    <div class="chart-wrapper">
+                        <canvas id="aiTrendChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="ai-history-section">
+                    <h3>📅 Check History</h3>
+                    <div id="aiHistory"></div>
+                </div>
+            </section>
             </section>
         </main>
 

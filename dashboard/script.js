@@ -240,6 +240,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const visibilityBtn = document.getElementById("checkVisibilityBtn");
   if (visibilityBtn) visibilityBtn.onclick = checkVisibility;
+  loadAIHistory();
 });
 
 
@@ -479,33 +480,41 @@ window.checkVisibility = async function() {
       return;
     }
 
-    const isVisible = data.status === "VISIBLE";
-    const checkedAt = new Date(data.checkedAt).toLocaleString();
+const isVisible = data.status === "VISIBLE";
+const checkedAt = new Date(data.checkedAt).toLocaleString();
 
-    // Prepend new result so latest is always on top
-    const card = document.createElement("div");
-    card.className = `ai-result-card ${isVisible ? "visible" : "hidden-result"}`;
-    card.innerHTML = `
-      <div class="ai-result-header">
-        <span class="ai-brand">${data.brandName}</span>
-        <span class="ai-badge ${isVisible ? "badge good" : "badge bad"}">
-          ${isVisible ? "✅ VISIBLE" : "❌ HIDDEN"}
-        </span>
-      </div>
-      <div class="ai-keyword">🔍 Keyword: "${data.keyword}"</div>
-      <div class="ai-snippet">${isVisible ? `💬 "${data.mentionSnippet}"` : "Your brand was not mentioned in the AI response."}</div>
-      <div class="ai-time">🕐 Checked at ${checkedAt}</div>
-      <details class="ai-raw">
-        <summary>See full AI response</summary>
-        <div class="ai-raw-content">${data.rawResponse}</div>
-      </details>
-    `;
+// rank badge
+const rankBadge = isVisible
+  ? `<span class="ai-rank-badge">🏆 Rank #${data.rank} of ${data.totalRecommendations}</span>`
+  : "";
+
+const card = document.createElement("div");
+card.className = `ai-result-card ${isVisible ? "visible" : "hidden-result"}`;
+card.innerHTML = `
+  <div class="ai-result-header">
+    <span class="ai-brand">${data.brandName}</span>
+    <div class="ai-badges">
+      <span class="ai-badge ${isVisible ? "badge good" : "badge bad"}">
+        ${isVisible ? "✅ VISIBLE" : "❌ HIDDEN"}
+      </span>
+      ${rankBadge}
+    </div>
+  </div>
+  <div class="ai-keyword">🔍 Keyword: "${data.keyword}"</div>
+  <div class="ai-snippet">${isVisible ? `💬 "${data.mentionSnippet}"` : "Your brand was not mentioned in the AI response."}</div>
+  <div class="ai-time">🕐 Checked at ${checkedAt}</div>
+  <details class="ai-raw">
+    <summary>See full AI response</summary>
+    <div class="ai-raw-content">${data.rawResponse}</div>
+  </details>
+`;
 
     // Clear loading and add result
     if (resultsDiv.querySelector(".loading")) {
       resultsDiv.innerHTML = "";
     }
     resultsDiv.insertBefore(card, resultsDiv.firstChild);
+    loadAIHistory(); // refresh history after each new check
 
   } catch (err) {
     resultsDiv.innerHTML = `<div class="ai-result-card error">❌ Network error. Try again.</div>`;
@@ -513,4 +522,260 @@ window.checkVisibility = async function() {
   }
 };
 
+// ================= AI VISIBILITY HISTORY =================
+async function loadAIHistory() {
+  const historyDiv = document.getElementById("aiHistory");
+  if (!historyDiv) return;
 
+  try {
+    const res = await fetch("/api/ai-visibility/history", {
+      headers: authHeaders()
+    });
+    const data = await res.json();
+
+    if (!data.success || data.history.length === 0) {
+      historyDiv.innerHTML = `<div class="ai-history-empty">No history yet — run your first check above!</div>`;
+      return;
+    }
+
+    historyDiv.innerHTML = `
+      <table class="ai-history-table">
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th>Keyword</th>
+            <th>Status</th>
+            <th>Rank</th>
+            <th>Checked At</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.history.map(log => `
+            <tr>
+              <td>${log.brandName}</td>
+              <td>${log.keyword}</td>
+              <td>
+                <span class="${log.status === "VISIBLE" ? "badge good" : "badge bad"}">
+                  ${log.status === "VISIBLE" ? "✅ VISIBLE" : "❌ HIDDEN"}
+                </span>
+                ${log.matchedAs ? `<div class="ai-aliases">matched as: ${log.matchedAs}</div>` : ""}
+              </td>
+              <td>${log.rank ? `#${log.rank} of ${log.totalRecommendations}` : "—"}</td>
+              <td>${new Date(log.checkedAt).toLocaleString()}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    console.error("Failed to load AI history:", err);
+  }
+}
+
+// ================= AI VISIBILITY MONITORS =================
+
+async function loadMonitors() {
+  const listDiv = document.getElementById("monitorsList");
+  if (!listDiv) return;
+
+  try {
+    const res = await fetch("/api/ai-visibility/monitors", {
+      headers: authHeaders()
+    });
+    const data = await res.json();
+
+    if (!data.success || data.monitors.length === 0) {
+      listDiv.innerHTML = `<div class="ai-history-empty">No monitors saved yet.</div>`;
+      return;
+    }
+
+    listDiv.innerHTML = `
+      <table class="ai-history-table">
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th>Keyword</th>
+            <th>Last Checked</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.monitors.map(m => `
+            <tr>
+              <td>
+                ${m.brandName}
+                ${m.aliases && m.aliases.length > 0 
+                  ? `<div class="ai-aliases">also: ${m.aliases.join(", ")}</div>` 
+                  : ""}
+              </td>
+              <td>${m.keyword}</td>
+              <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting for first check..."}</td>
+              <td class="monitor-actions">
+  <button class="btn-details" onclick="showTrend('${m.brandName}', '${m.keyword}')">📈 Trend</button>
+  <button class="btn-remove" onclick="deleteMonitor('${m._id}')">Remove</button>
+</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    console.error("Failed to load monitors:", err);
+  }
+}
+
+window.deleteMonitor = async function(id) {
+  if (!confirm("Remove this monitor?")) return;
+  try {
+    const res = await fetch(`/api/ai-visibility/monitor/${id}`, {
+      method: "DELETE",
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (data.success) loadMonitors();
+    else alert(data.message || "Failed to remove monitor");
+  } catch (err) {
+    console.error("Delete monitor error:", err);
+  }
+};
+
+async function saveMonitor() {
+  const brandName = document.getElementById("monitorBrandInput").value.trim();
+  const keyword = document.getElementById("monitorKeywordInput").value.trim();
+  const aliasRaw = document.getElementById("monitorAliasInput").value.trim();
+  const aliases = aliasRaw ? aliasRaw.split(",").map(a => a.trim()).filter(a => a !== "") : [];
+
+  if (!brandName || !keyword) {
+    alert("Please enter both brand name and keyword.");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/ai-visibility/monitor", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders()
+      },
+      body: JSON.stringify({ brandName, keyword, aliases })
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById("monitorBrandInput").value = "";
+      document.getElementById("monitorKeywordInput").value = "";
+      document.getElementById("monitorAliasInput").value = "";
+      loadMonitors();
+    } else {
+      alert(data.message || "Failed to save monitor");
+    }
+  } catch (err) {
+    console.error("Save monitor error:", err);
+  }
+}
+
+// bind save button
+document.addEventListener("DOMContentLoaded", () => {
+  const saveBtn = document.getElementById("saveMonitorBtn");
+  if (saveBtn) saveBtn.onclick = saveMonitor;
+});
+
+// load monitors on startup
+document.addEventListener("DOMContentLoaded", () => {
+  loadMonitors();
+});
+
+// ================= AI TREND CHART =================
+let activeTrendChart = null;
+
+window.showTrend = async function(brandName, keyword) {
+  const section = document.getElementById("aiTrendSection");
+  const title = document.getElementById("aiTrendTitle");
+  const canvas = document.getElementById("aiTrendChart");
+
+  section.classList.remove("hidden");
+  title.textContent = `"${brandName}" — "${keyword}"`;
+
+  // destroy previous chart
+  if (activeTrendChart) { activeTrendChart.destroy(); activeTrendChart = null; }
+
+  try {
+    const params = new URLSearchParams({ brandName, keyword });
+    const res = await fetch(`/api/ai-visibility/trend?${params}`, {
+      headers: authHeaders()
+    });
+    const data = await res.json();
+
+    if (!data.success || data.trend.length === 0) {
+      section.innerHTML += `<div class="ai-history-empty">Not enough data yet — check back after a few daily checks.</div>`;
+      return;
+    }
+
+    const labels = data.trend.map(d => d.date);
+    const ranks = data.trend.map(d => d.rank ?? 6); // 6 = hidden (off chart)
+    const colors = data.trend.map(d => d.status === "VISIBLE" ? "#10b981" : "#ef4444");
+
+    const ctx = canvas.getContext("2d");
+    activeTrendChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Rank Position",
+          data: ranks,
+          borderColor: "#6366f1",
+          backgroundColor: "rgba(99,102,241,0.1)",
+          borderWidth: 2,
+          pointRadius: 6,
+          pointBackgroundColor: colors,
+          pointBorderColor: colors,
+          pointHoverRadius: 8,
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const val = ctx.parsed.y;
+                return val >= 6 ? "❌ HIDDEN" : `✅ Rank #${val}`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            reverse: true, // rank 1 at top, rank 5 at bottom
+            min: 1,
+            max: 6,
+            ticks: {
+              stepSize: 1,
+              color: "#9ca3af",
+              callback: v => v >= 6 ? "Hidden" : `#${v}`
+            },
+            grid: { color: "rgba(255,255,255,0.05)" }
+          },
+          x: {
+            ticks: { color: "#9ca3af", maxTicksLimit: 10 },
+            grid: { color: "rgba(255,255,255,0.05)" }
+          }
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error("Trend chart error:", err);
+  }
+};
+
+// Close trend chart
+document.addEventListener("DOMContentLoaded", () => {
+  const closeBtn = document.getElementById("closeTrendBtn");
+  if (closeBtn) closeBtn.onclick = () => {
+    document.getElementById("aiTrendSection").classList.add("hidden");
+    if (activeTrendChart) { activeTrendChart.destroy(); activeTrendChart = null; }
+  };
+});

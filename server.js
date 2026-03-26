@@ -15,7 +15,8 @@ import { DataCleanup, startCleanupScheduler } from "./utils/dataCleanup.js";
 import { authenticateToken, generateToken } from "./utils/auth.js";
 
 import monitorModule, { addNewWebsite, removeWebsite } from "./monitor.js"; // importing monitor starts monitoring in that module
-
+import AIVisibilityLog from "./models/AIVisibilityLog.js";
+import AIVisibilityMonitor from "./models/AIVisibilityMonitor.js";
 // Connect DB and validate
 await connectDB();
 validateEnvironment();
@@ -322,9 +323,10 @@ app.post("/cleanup", async (req, res) => {
 });
 
 // ==================== AI SEARCH VISIBILITY ====================
+// ==================== AI SEARCH VISIBILITY ====================
 app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
   try {
-    const { brandName, keyword } = req.body;
+    const { brandName, keyword, aliases = [] } = req.body;
 
     if (!brandName || !keyword) {
       return res.status(400).json({
@@ -332,6 +334,9 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
         message: "brandName and keyword are required"
       });
     }
+
+    // build full list of names to check — brand + all aliases
+    const allNames = [brandName, ...aliases.map(a => a.trim()).filter(a => a !== "")];
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -341,8 +346,13 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
       });
     }
 
-    // Build the prompt
-    const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a list of 5 top recommendations with a brief reason for each.`;
+    // Build the prompt — ask for numbered list so we can detect rank
+    const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a numbered list of exactly 5 top recommendations with a brief reason for each. Format strictly as:
+1. BrandName: reason
+2. BrandName: reason
+3. BrandName: reason
+4. BrandName: reason
+5. BrandName: reason`;
 
     // Call Gemini API
     const geminiRes = await fetch(
@@ -368,27 +378,69 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
     const geminiData = await geminiRes.json();
     const aiResponse = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-    // Check if brand is mentioned
-    const isVisible = aiResponse.toLowerCase().includes(brandName.toLowerCase());
-
-    // Extract the sentence where brand is mentioned
+    // ── Rank detection with alias support ──
+    const lines = aiResponse.split("\n").filter(l => l.trim() !== "");
+    let rank = null;
+    let totalRecommendations = 0;
     let mentionSnippet = "Not mentioned";
-    if (isVisible) {
-      const sentences = aiResponse.split(/[.\n]/);
-      const matchingSentence = sentences.find(s =>
-        s.toLowerCase().includes(brandName.toLowerCase())
-      );
-      mentionSnippet = matchingSentence?.trim() || "Mentioned in response";
-    }
+    let matchedAs = null;
 
-    console.log(`🤖 AI Visibility check — Brand: "${brandName}", Keyword: "${keyword}", Status: ${isVisible ? "VISIBLE" : "HIDDEN"}`);
+    lines.forEach(line => {
+      const numberMatch = line.match(/^(\d+)[.)]/);
+      if (numberMatch) {
+        totalRecommendations++;
+        const position = parseInt(numberMatch[1]);
+        // check brand AND all aliases
+        for (const name of allNames) {
+          if (line.toLowerCase().includes(name.toLowerCase())) {
+            rank = position;
+            mentionSnippet = line.trim();
+            matchedAs = name;
+            break;
+          }
+        }
+      }
+    });
 
-    res.json({
+    // fallback if prompt format wasn't followed strictly
+    if (totalRecommendations === 0) totalRecommendations = 5;
+
+    const isVisible = rank !== null;
+
+    console.log(`🤖 AI Visibility — Brand: "${brandName}", Keyword: "${keyword}", Rank: ${rank ?? "not found"}/${totalRecommendations}`);
+     
+    // Save result to MongoDB
+try {
+  await AIVisibilityLog.create({
+    userId: req.userId,
+    brandName,
+    keyword,
+    status: isVisible ? "VISIBLE" : "HIDDEN",
+    rank,
+    totalRecommendations,
+    mentionSnippet,
+    matchedAs,
+    checkedAt: new Date()
+  });
+  console.log(`💾 AI visibility result saved to DB`);
+} catch (saveErr) {
+  console.error("Failed to save AI visibility log:", saveErr.message);
+  // don't fail the request if save fails
+}
+
+
+
+
+
+ res.json({
       success: true,
       brandName,
       keyword,
       status: isVisible ? "VISIBLE" : "HIDDEN",
+      rank,
+      totalRecommendations,
       mentionSnippet,
+      matchedAs,
       rawResponse: aiResponse,
       checkedAt: new Date().toISOString()
     });
@@ -401,6 +453,239 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
     });
   }
 });
+
+
+// ==================== AI VISIBILITY HISTORY ====================
+app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
+  try {
+    const { brandName, keyword } = req.query;
+
+    // build filter — optionally filter by brand/keyword
+    const filter = { userId: req.userId };
+    if (brandName) filter.brandName = new RegExp(brandName, "i");
+    if (keyword) filter.keyword = new RegExp(keyword, "i");
+
+    const logs = await AIVisibilityLog.find(filter)
+      .sort({ checkedAt: -1 })
+      .limit(50)
+      .lean();
+
+    res.json({ success: true, history: logs });
+  } catch (err) {
+    console.error("AI visibility history error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to fetch history" });
+  }
+});
+
+
+// ==================== AI VISIBILITY MONITORS ====================
+
+// Save a brand+keyword pair to auto-monitor
+app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
+  try {
+    const { brandName, keyword, aliases = [] } = req.body;
+    if (!brandName || !keyword) {
+      return res.status(400).json({ success: false, message: "brandName and keyword are required" });
+    }
+
+    // check if already exists
+    const exists = await AIVisibilityMonitor.findOne({
+      userId: req.userId,
+      brandName: new RegExp(`^${brandName}$`, "i"),
+      keyword: new RegExp(`^${keyword}$`, "i")
+    });
+
+    if (exists) {
+      return res.status(400).json({ success: false, message: "Already monitoring this brand+keyword pair" });
+    }
+
+const monitor = await AIVisibilityMonitor.create({
+      userId: req.userId,
+      brandName,
+      keyword,
+      aliases
+    });
+
+    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" for user ${req.userId}`);
+    res.json({ success: true, message: "Monitor saved", monitor });
+  } catch (err) {
+    console.error("Save monitor error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to save monitor" });
+  }
+});
+
+// Get all saved monitors for current user
+app.get("/api/ai-visibility/monitors", authenticateToken, async (req, res) => {
+  try {
+    const monitors = await AIVisibilityMonitor.find({ userId: req.userId })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ success: true, monitors });
+  } catch (err) {
+    console.error("Get monitors error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to fetch monitors" });
+  }
+});
+
+// Delete a monitor
+app.delete("/api/ai-visibility/monitor/:id", authenticateToken, async (req, res) => {
+  try {
+    const monitor = await AIVisibilityMonitor.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.userId // ensure user can only delete their own
+    });
+
+    if (!monitor) {
+      return res.status(404).json({ success: false, message: "Monitor not found" });
+    }
+
+    res.json({ success: true, message: "Monitor removed" });
+  } catch (err) {
+    console.error("Delete monitor error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to delete monitor" });
+  }
+});
+
+// ==================== AI VISIBILITY SCHEDULER ====================
+async function runAIVisibilityChecks() {
+  console.log("🤖 Running scheduled AI visibility checks...");
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("❌ Gemini API key not configured — skipping AI visibility checks");
+    return;
+  }
+
+  try {
+    const monitors = await AIVisibilityMonitor.find({ isActive: true });
+    console.log(`📋 Found ${monitors.length} active AI visibility monitors`);
+
+    for (const monitor of monitors) {
+      try {
+        const { brandName, keyword, userId, _id, aliases = [] } = monitor;
+        const allNames = [brandName, ...aliases.map(a => a.trim()).filter(a => a !== "")];
+
+        const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a numbered list of exactly 5 top recommendations with a brief reason for each. Format strictly as:
+1. BrandName: reason
+2. BrandName: reason
+3. BrandName: reason
+4. BrandName: reason
+5. BrandName: reason`;
+
+        const geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }]
+            })
+          }
+        );
+
+        if (!geminiRes.ok) {
+          console.error(`❌ Gemini failed for "${brandName}+${keyword}"`);
+          continue; // skip this one, try next
+        }
+
+        const geminiData = await geminiRes.json();
+        const aiResponse = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+        // rank detection
+        const lines = aiResponse.split("\n").filter(l => l.trim() !== "");
+        let rank = null;
+        let totalRecommendations = 0;
+        let mentionSnippet = "Not mentioned";
+        let matchedAs = null;
+
+        lines.forEach(line => {
+          const numberMatch = line.match(/^(\d+)[.)]/);
+          if (numberMatch) {
+            totalRecommendations++;
+            const position = parseInt(numberMatch[1]);
+            for (const name of allNames) {
+              if (line.toLowerCase().includes(name.toLowerCase())) {
+                rank = position;
+                mentionSnippet = line.trim();
+                matchedAs = name;
+                break;
+              }
+            }
+          }
+        });
+
+        if (totalRecommendations === 0) totalRecommendations = 5;
+        const isVisible = rank !== null;
+
+        // save result
+    await AIVisibilityLog.create({
+          userId,
+          brandName,
+          keyword,
+          status: isVisible ? "VISIBLE" : "HIDDEN",
+          rank,
+          totalRecommendations,
+          mentionSnippet,
+          matchedAs,
+          checkedAt: new Date()
+        });
+
+        // update lastCheckedAt
+        await AIVisibilityMonitor.findByIdAndUpdate(_id, { lastCheckedAt: new Date() });
+
+        console.log(`✅ Auto-checked "${brandName}" for "${keyword}" → ${isVisible ? `VISIBLE #${rank}` : "HIDDEN"}`);
+
+        // wait 2 seconds between checks to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+      } catch (monitorErr) {
+        console.error(`❌ Failed check for monitor ${monitor._id}:`, monitorErr.message);
+      }
+    }
+
+    console.log("✅ Scheduled AI visibility checks completed");
+  } catch (err) {
+    console.error("❌ AI visibility scheduler error:", err.message);
+  }
+}
+
+// Run once on startup, then every 24 hours
+runAIVisibilityChecks();
+setInterval(runAIVisibilityChecks, 24 * 60 * 60 * 1000);
+
+// ==================== AI VISIBILITY TREND ====================
+app.get("/api/ai-visibility/trend", authenticateToken, async (req, res) => {
+  try {
+    const { brandName, keyword } = req.query;
+
+    if (!brandName || !keyword) {
+      return res.status(400).json({ success: false, message: "brandName and keyword are required" });
+    }
+
+    const logs = await AIVisibilityLog.find({
+      userId: req.userId,
+      brandName: new RegExp(`^${brandName}$`, "i"),
+      keyword: new RegExp(`^${keyword}$`, "i")
+    })
+      .sort({ checkedAt: 1 }) // oldest first for chart
+      .limit(30)
+      .lean();
+
+    const trend = logs.map(log => ({
+      date: new Date(log.checkedAt).toLocaleDateString(),
+      rank: log.rank,
+      status: log.status
+    }));
+
+    res.json({ success: true, trend, brandName, keyword });
+  } catch (err) {
+    console.error("Trend error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to fetch trend" });
+  }
+});
+
+
+
 
 // Start Express
 try {
