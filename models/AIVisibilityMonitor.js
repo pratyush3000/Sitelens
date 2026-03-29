@@ -5,6 +5,7 @@ const aiVisibilityMonitorSchema = new mongoose.Schema({
   brandName: { type: String, required: true },
   keyword: { type: String, required: true },
   isActive: { type: Boolean, default: true },
+  aliases: { type: [String], default: [] }, // e.g. ["Prime Video", "Amazon Prime Video"]
   lastCheckedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });

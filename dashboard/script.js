@@ -233,13 +233,21 @@ window.openDetails = function(ev){
   showDrawer(site);
 };
 
-// Close drawer button (bind once)
 document.addEventListener("DOMContentLoaded", () => {
   const closeBtn = document.getElementById("closeDrawer");
-  if (closeBtn) closeBtn.onclick = () => document.getElementById("drawer").classList.add("hidden");
+  const overlay = document.getElementById("drawerOverlay");
+
+  const closeDrawer = () => {
+    document.getElementById("drawer").classList.add("hidden");
+    if (overlay) overlay.classList.add("hidden");
+  };
+
+  if (closeBtn) closeBtn.onclick = closeDrawer;
+  if (overlay) overlay.onclick = closeDrawer;
 
   const visibilityBtn = document.getElementById("checkVisibilityBtn");
   if (visibilityBtn) visibilityBtn.onclick = checkVisibility;
+
   loadAIHistory();
 });
 
@@ -252,6 +260,7 @@ async function showDrawer(site){
   const content = $("drawerContent");
   content.innerHTML = `<h2>${site}</h2><div class="padded small">Loading...</div>`;
   $("drawer").classList.remove("hidden");
+  document.getElementById("drawerOverlay").classList.remove("hidden");
 
   try {
     const res = await fetch('/stats', { headers: authHeaders() });
@@ -274,11 +283,16 @@ async function showDrawer(site){
         <div class="drawer-stat"><div class="drawer-stat-label">Server Errors</div><div class="drawer-stat-value">${s.serverErrors || 0}</div></div>
       </div>
 
-      <div class="chart-section">
+<div class="chart-section">
         <h3>Response Time Trend</h3>
         <div class="chart-wrapper">
           <canvas id="latencyChart"></canvas>
         </div>
+      </div>
+
+      <div class="incident-section">
+        <h3>🔴 Incident Timeline</h3>
+        <div id="incidentTimeline"><div class="padded small">Loading incidents...</div></div>
       </div>
     `;
 
@@ -334,9 +348,68 @@ async function showDrawer(site){
       }
     });
 
+// load incidents after chart
+    loadIncidents(site);
+
   } catch(e) {
     content.innerHTML = `<div class="padded">Error loading details</div>`;
     console.error(e);
+  }
+}
+
+// ================= INCIDENT TIMELINE =================
+async function loadIncidents(site) {
+  const container = document.getElementById("incidentTimeline");
+  if (!container) return;
+
+  try {
+    const encoded = encodeURIComponent(site);
+    const res = await fetch(`/api/incidents/${encoded}`, {
+      headers: authHeaders()
+    });
+    const data = await res.json();
+
+    if (!data.success) {
+      container.innerHTML = `<div class="incident-empty">Failed to load incidents.</div>`;
+      return;
+    }
+
+    if (data.incidents.length === 0) {
+      container.innerHTML = `
+        <div class="incident-empty">
+          ✅ No incidents recorded — site has been healthy!
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = data.incidents.map(inc => {
+      const time = new Date(inc.timestamp).toLocaleString();
+      const isDown = inc.errorType === "down" || inc.rating === "critical";
+      const icon = isDown ? "🔴" : "🟡";
+      const typeLabel = inc.errorType === "blocked" ? "Blocked"
+        : inc.errorType === "timeout" ? "Timeout"
+        : inc.errorType === "server_error" ? "Server Error"
+        : "Down";
+
+      return `
+        <div class="incident-item ${isDown ? "incident-critical" : "incident-warn"}">
+          <div class="incident-header">
+            <span class="incident-icon">${icon}</span>
+            <span class="incident-type">${typeLabel}</span>
+            <span class="incident-time">${time}</span>
+          </div>
+          <div class="incident-details">
+            ${inc.duration ? `<span class="incident-detail">⏱️ Duration: ${inc.duration}</span>` : `<span class="incident-detail">⏱️ Still recovering or unknown</span>`}
+            ${inc.responseTime ? `<span class="incident-detail">📡 Response: ${inc.responseTime}ms</span>` : ""}
+            ${inc.error ? `<span class="incident-detail error-msg">❌ ${inc.error.substring(0, 80)}</span>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+  } catch (err) {
+    container.innerHTML = `<div class="incident-empty">Error loading incidents.</div>`;
+    console.error("Incident load error:", err);
   }
 }
 
@@ -358,7 +431,9 @@ async function loadStats(){
       container.appendChild(makeCard(site, data[site]));
     });
 
-    $('lastUpdated').innerText = new Date().toLocaleString();
+    const timeStr = new Date().toLocaleString();
+if($('lastUpdated')) $('lastUpdated').innerText = timeStr;
+if($('lastUpdatedFooter')) $('lastUpdatedFooter').innerText = timeStr;
   } catch (err){
     console.error('Failed to load stats', err);
     stopTimer();

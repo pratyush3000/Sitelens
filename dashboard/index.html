@@ -6,102 +6,160 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>SiteLens — Monitoring Dashboard</title>
 
-    <!-- Chart.js CDN -->
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-    <!-- Login/Signup Modal -->
+
+    <!-- ── AUTH MODAL ── -->
     <div id="authModal" class="auth-modal">
         <div class="auth-container">
-            <h2>📊 SiteLens</h2>
-            <div id="authTabs">
-                <button class="auth-tab active" onclick="showLogin()">Login</button>
+            <div class="auth-logo">
+                <span class="auth-logo-icon">⬡</span>
+                <span class="auth-logo-text">SiteLens</span>
+            </div>
+            <p class="auth-tagline">Monitor your web presence & AI visibility</p>
+
+            <div id="authTabs" class="auth-tabs">
+                <button class="auth-tab active" onclick="showLogin()">Sign In</button>
                 <button class="auth-tab" onclick="showSignup()">Sign Up</button>
             </div>
+
             <div id="loginForm" class="auth-form">
-                <input type="email" id="loginEmail" placeholder="Email" required />
-                <input type="password" id="loginPassword" placeholder="Password" required />
-                <button onclick="handleLogin()">Login</button>
+                <div class="input-group">
+                    <label>Email</label>
+                    <input type="email" id="loginEmail" placeholder="you@example.com" />
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="loginPassword" placeholder="••••••••" />
+                </div>
+                <button class="btn-primary" onclick="handleLogin()">Sign In →</button>
                 <p id="loginError" class="error-message"></p>
             </div>
+
             <div id="signupForm" class="auth-form hidden">
-                <input type="text" id="signupUsername" placeholder="Username" required />
-                <input type="email" id="signupEmail" placeholder="Email" required />
-                <input type="password" id="signupPassword" placeholder="Password (min 6 chars)" required />
-                <button onclick="handleSignup()">Sign Up</button>
+                <div class="input-group">
+                    <label>Username</label>
+                    <input type="text" id="signupUsername" placeholder="yourname" />
+                </div>
+                <div class="input-group">
+                    <label>Email</label>
+                    <input type="email" id="signupEmail" placeholder="you@example.com" />
+                </div>
+                <div class="input-group">
+                    <label>Password</label>
+                    <input type="password" id="signupPassword" placeholder="min 6 characters" />
+                </div>
+                <button class="btn-primary" onclick="handleSignup()">Create Account →</button>
                 <p id="signupError" class="error-message"></p>
             </div>
         </div>
     </div>
 
-    <!-- Main Dashboard (hidden until logged in) -->
+    <!-- ── MAIN DASHBOARD ── -->
     <div id="dashboard" class="hidden">
+
+        <!-- Header -->
         <header class="topbar">
-            <div class="title">📊 SiteLens — Monitoring Dashboard</div>
-            <div class="controls">
-                <span id="userInfo" class="user-info"></span>
-                <label>Auto-refresh
+            <div class="topbar-left">
+                <span class="logo-icon">⬡</span>
+                <span class="logo-text">SiteLens</span>
+                <span class="live-badge">
+                    <span class="live-dot"></span>
+                    LIVE
+                </span>
+            </div>
+            <div class="topbar-right">
+                <span id="userInfo" class="user-chip"></span>
+                <label class="toggle-label">
                     <input id="autoRefreshToggle" type="checkbox" checked />
+                    <span>Auto-refresh</span>
                 </label>
-                <button id="refreshBtn">Refresh</button>
-                <button id="logoutBtn" onclick="handleLogout()">Logout</button>
+                <button class="btn-icon" id="refreshBtn">↻</button>
+                <button class="btn-outline" onclick="handleLogout()">Sign Out</button>
             </div>
         </header>
 
-        <div class="search-container">
-            <input id="siteInput" type="text" placeholder="Enter website URL (https://...)" />
-            <button onclick="addSite()">Start Monitoring</button>
+        <!-- Add Site Bar -->
+        <div class="add-site-bar">
+            <div class="add-site-inner">
+                <span class="add-site-label">＋ Monitor a site</span>
+                <input id="siteInput" type="text" placeholder="https://yourwebsite.com" />
+                <button class="btn-primary" onclick="addSite()">Start Monitoring</button>
+            </div>
         </div>
 
-
-
-
         <main class="container">
-            <section id="overview" class="overview">
+
+            <!-- Overview Stats -->
+            <section class="overview">
                 <div class="overview-card">
+                    <div class="overview-icon">◈</div>
                     <div class="overview-value" id="totalSites">—</div>
                     <div class="overview-label">Monitored Sites</div>
                 </div>
                 <div class="overview-card">
+                    <div class="overview-icon">▲</div>
                     <div class="overview-value" id="overallUptime">—</div>
-                    <div class="overview-label">Average Uptime %</div>
+                    <div class="overview-label">Average Uptime</div>
                 </div>
                 <div class="overview-card">
+                    <div class="overview-icon">⚡</div>
                     <div class="overview-value" id="avgLatency">—</div>
-                    <div class="overview-label">Avg Response (ms)</div>
+                    <div class="overview-label">Avg Response</div>
                 </div>
                 <div class="overview-card">
+                    <div class="overview-icon">⚠</div>
                     <div class="overview-value" id="slowCount">—</div>
                     <div class="overview-label">Slow Requests</div>
                 </div>
             </section>
 
+            <!-- Section label -->
+            <div class="section-label">
+                <span>Monitored Sites</span>
+                <span id="lastUpdated" class="last-updated">—</span>
+            </div>
+
+            <!-- Site Cards -->
             <section id="cards" class="cards"></section>
-            <!-- AI Search Visibility Section -->
+
+            <!-- AI Visibility Section -->
+            <div class="section-label" style="margin-top:48px">
+                <span>🤖 AI Search Visibility</span>
+            </div>
+
             <section id="aiVisibility" class="ai-visibility-section">
-                <h2>🤖 AI Search Visibility</h2>
                 <p class="ai-subtitle">Check if your brand appears when AI recommends products or services</p>
+
                 <div class="ai-input-row">
                     <input id="brandInput" type="text" placeholder="Brand name (e.g. Netflix)" />
                     <input id="keywordInput" type="text" placeholder="Keyword (e.g. best streaming service)" />
-                    <button id="checkVisibilityBtn">Check Visibility</button>
+                    <button id="checkVisibilityBtn" class="btn-primary">Check Visibility</button>
                 </div>
+
                 <div id="aiResults" class="ai-results"></div>
 
-                <!-- Auto-monitor management -->
+                <!-- Auto-Monitor -->
                 <div class="ai-monitors-section">
-                    <h3>⏰ Auto-Monitor (Daily Checks)</h3>
-                    <p class="ai-subtitle">Save brand+keyword pairs to check automatically every 24 hours</p>
+                    <h3>⏰ Auto-Monitor <span class="badge-subtle">Daily</span></h3>
+                    <p class="ai-subtitle">Save brand+keyword pairs — checked automatically every 24 hours</p>
                     <div class="ai-input-row">
-                        <input id="monitorBrandInput" type="text" placeholder="Brand name (e.g. Amazon Prime)" />
-                        <input id="monitorAliasInput" type="text"
-                            placeholder="Aliases, comma separated (e.g. Prime Video, Prime)" />
-                        <input id="monitorKeywordInput" type="text"
-                            placeholder="Keyword (e.g. best streaming service)" />
-                        <button id="saveMonitorBtn">Save Monitor</button>
+                        <input id="monitorBrandInput" type="text" placeholder="Brand name" />
+                        <input id="monitorAliasInput" type="text" placeholder="Aliases, comma separated (optional)" />
+                        <input id="monitorKeywordInput" type="text" placeholder="Keyword" />
+                        <button id="saveMonitorBtn" class="btn-primary">Save Monitor</button>
                     </div>
                     <div id="monitorsList"></div>
                 </div>
@@ -110,30 +168,40 @@
                 <div class="ai-trend-section hidden" id="aiTrendSection">
                     <div class="ai-trend-header">
                         <h3>📈 Rank Trend: <span id="aiTrendTitle"></span></h3>
-                        <button id="closeTrendBtn">✕ Close</button>
+                        <button id="closeTrendBtn" class="btn-outline-sm">✕ Close</button>
                     </div>
                     <div class="chart-wrapper">
                         <canvas id="aiTrendChart"></canvas>
                     </div>
                 </div>
 
+                <!-- History -->
                 <div class="ai-history-section">
                     <h3>📅 Check History</h3>
                     <div id="aiHistory"></div>
                 </div>
+
             </section>
-            </section>
+
         </main>
 
-        <!-- Site details drawer -->
+        <!-- Drawer -->
         <aside id="drawer" class="drawer hidden">
-            <button id="closeDrawer" class="close">✕</button>
+            <div class="drawer-topbar">
+                <span class="drawer-title">Site Details</span>
+                <button id="closeDrawer" class="btn-icon">✕</button>
+            </div>
             <div id="drawerContent"></div>
         </aside>
 
+        <!-- Drawer overlay -->
+        <div id="drawerOverlay" class="drawer-overlay hidden"></div>
+
         <footer class="footer">
-            <small>Last updated: <span id="lastUpdated">—</span></small>
+            <span>SiteLens — Real-time monitoring</span>
+            <span>Last updated: <span id="lastUpdatedFooter">—</span></span>
         </footer>
+
     </div>
 
     <script src="script.js"></script>

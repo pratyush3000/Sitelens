@@ -685,7 +685,62 @@ app.get("/api/ai-visibility/trend", authenticateToken, async (req, res) => {
 });
 
 
+// ==================== INCIDENT TIMELINE ====================
+app.get("/api/incidents/:site", authenticateToken, async (req, res) => {
+  try {
+    const site = decodeURIComponent(req.params.site);
 
+    const incidents = await Log.find({
+      userId: req.userId,
+      website: site,
+      messagetype: { $in: ["down", "warn"] }
+    })
+      .sort({ timestamp: -1 })
+      .limit(10)
+      .lean();
+
+    // calculate duration between consecutive down events
+    const allLogs = await Log.find({
+      userId: req.userId,
+      website: site
+    })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    // map each incident with duration
+    const enriched = incidents.map(incident => {
+      const incidentTime = new Date(incident.timestamp);
+
+      // find next "up" log after this incident
+      const recovery = allLogs.find(log =>
+        log.messagetype === "up" &&
+        new Date(log.timestamp) > incidentTime
+      );
+
+      let duration = null;
+      if (recovery) {
+        const ms = new Date(recovery.timestamp) - incidentTime;
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000);
+        duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+      }
+
+      return {
+        timestamp: incident.timestamp,
+        errorType: incident.errorType || incident.messagetype,
+        error: incident.error || "Unknown error",
+        responseTime: incident.responseTime,
+        rating: incident.rating,
+        duration
+      };
+    });
+
+    res.json({ success: true, incidents: enriched, site });
+  } catch (err) {
+    console.error("Incidents error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to fetch incidents" });
+  }
+});
 
 // Start Express
 try {
