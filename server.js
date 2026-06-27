@@ -361,50 +361,95 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
 
     for (const model of models) {
       try {
+        if (!model || model === "undefined") {
+          console.error(`❌ [VALIDATION] Invalid model name: "${model}"`);
+          results[model] = { status: "ERROR", error: "Invalid model name" };
+          continue;
+        }
+
         const result = await checkBrandVisibility(prompt, model, allNames);
+
+        // Validate result has proper model field
+        if (!result.model || result.model === "undefined") {
+          console.error(`❌ [VALIDATION] Result returned with undefined model: ${JSON.stringify(result).substring(0, 100)}`);
+          results[model] = { status: "ERROR", error: "Result has undefined model name" };
+          continue;
+        }
+
         results[model] = result;
         console.log(`✅ ${model}: "${brandName}" for "${keyword}" → ${result.status} ${result.rank ? `#${result.rank}` : ""}`);
       } catch (err) {
         console.error(`❌ ${model} check failed:`, err.message);
-        results[model] = { status: "ERROR", error: err.message };
+        results[model] = {
+          status: "ERROR",
+          error: err.message,
+          model: model || "unknown"  // Ensure model field exists even in error
+        };
       }
     }
 
     const checkedAt = new Date();
 
-    // Save logs for both models
-    for (const model of models) {
-      if (results[model].status !== "ERROR") {
-        try {
-          await AIVisibilityLog.create({
-            userId: req.userId,
-            brandName,
-            keyword,
-            status: results[model].status,
-            rank: results[model].rank,
-            totalRecommendations: results[model].totalRecommendations,
-            mentionSnippet: results[model].mentionSnippet,
-            matchedAs: results[model].matchedAs,
-            model,
-            rawResponse: results[model].rawResponse,
-            checkedAt
-          });
-        } catch (saveErr) {
-          console.error(`Failed to save ${model} log:`, saveErr.message);
+    // Save logs for models that succeeded (never save undefined keys)
+    for (const modelKey of models) {
+      const result = results[modelKey];
+
+      if (result.status === "ERROR") {
+        console.log(`⏭️  Skipped ${modelKey} (status: ERROR)`);
+        continue;
+      }
+
+      try {
+        // CRITICAL GUARD: Never save with undefined model key
+        if (!modelKey || modelKey === "undefined") {
+          console.error(`❌ [SAVE] Refusing to save: invalid modelKey "${modelKey}"`);
+          continue;
         }
+        if (!result.model || result.model === "undefined") {
+          console.error(`❌ [SAVE] Refusing to save: result.model is "${result.model}". This entry would create an undefined key.`);
+          continue;
+        }
+
+        console.log(`💾 [SAVE] Storing ${result.model} result to database`);
+
+        await AIVisibilityLog.create({
+          userId: req.userId,
+          brandName,
+          keyword,
+          status: result.status,
+          rank: result.rank,
+          totalRecommendations: result.totalRecommendations,
+          mentionSnippet: result.mentionSnippet,
+          matchedAs: result.matchedAs,
+          model: result.model,  // Use result.model (validated by utility)
+          rawResponse: result.rawResponse,
+          checkedAt
+        });
+      } catch (saveErr) {
+        console.error(`❌ Failed to save ${modelKey} log:`, saveErr.message);
       }
     }
 
-    // Filter out ERROR results and compute aggregation
+    // Filter out ERROR results and validate keys
     const successfulResults = Object.fromEntries(
-      Object.entries(results).filter(([_, r]) => r.status !== "ERROR")
+      Object.entries(results).filter(([modelName, r]) => {
+        if (r.status === "ERROR") return false;
+        if (!modelName || modelName === "undefined") {
+          console.error(`⚠️  Skipping result with invalid model name: "${modelName}"`);
+          return false;
+        }
+        return true;
+      })
     );
+
     const visibleResults = Object.values(successfulResults).filter(r => r.status === "VISIBLE");
     const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
     const successCount = Object.keys(successfulResults).length;
-    const aggregatedStatus = visibleResults.length > 0
-      ? `Visible in ${visibleResults.length} of ${successCount}`
-      : `Not visible in any model`;
+    const aggregatedStatus = successCount === 0
+      ? "No models checked successfully"
+      : visibleResults.length > 0
+        ? `Visible in ${visibleResults.length} of ${successCount}`
+        : `Not visible in any model`;
 
     res.json({
       success: true,
@@ -413,6 +458,7 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
       status: aggregatedStatus,
       rank: bestRank,
       modelsChecked: successCount,
+      modelsAttempted: models.length,
       checkedAt: checkedAt.toISOString(),
       internalDetails: successfulResults
     });
@@ -441,12 +487,17 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
       .limit(100)
       .lean();
 
-    // Group by (brandName, keyword, checkedAt) to get batches of 2 model results
+    // Group by (brandName, keyword, checkedAt) to get batches of model results
     const grouped = {};
     for (const log of rawLogs) {
       const key = `${log.brandName}|${log.keyword}|${log.checkedAt.getTime()}`;
       if (!grouped[key]) {
         grouped[key] = { brandName: log.brandName, keyword: log.keyword, checkedAt: log.checkedAt, models: {} };
+      }
+      // Validate model name is not undefined or null
+      if (!log.model || log.model === "undefined") {
+        console.warn(`⚠️  Skipping log entry with invalid model name: "${log.model}"`);
+        continue;
       }
       grouped[key].models[log.model] = {
         status: log.status,
@@ -468,7 +519,11 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
         brandName: batch.brandName,
         keyword: batch.keyword,
         checkedAt: batch.checkedAt,
-        status: visibleCount > 0 ? `Visible in ${visibleCount} of ${totalModels}` : "Not visible",
+        status: totalModels === 0
+          ? "No successful checks"
+          : visibleCount > 0
+            ? `Visible in ${visibleCount} of ${totalModels}`
+            : "Not visible",
         rank: bestRank,
         modelsChecked: totalModels,
         internalDetails: batch.models
@@ -586,26 +641,43 @@ async function runAIVisibilityChecks() {
 
         const checkedAt = new Date();
 
-        // Save logs for both models
-        for (const model of models) {
-          if (results[model].status !== "ERROR") {
-            try {
-              await AIVisibilityLog.create({
-                userId,
-                brandName,
-                keyword,
-                status: results[model].status,
-                rank: results[model].rank,
-                totalRecommendations: results[model].totalRecommendations,
-                mentionSnippet: results[model].mentionSnippet,
-                matchedAs: results[model].matchedAs,
-                model,
-                rawResponse: results[model].rawResponse,
-                checkedAt
-              });
-            } catch (saveErr) {
-              console.error(`Failed to save ${model} log:`, saveErr.message);
+        // Save logs for models that succeeded (never save undefined keys)
+        for (const modelKey of models) {
+          const result = results[modelKey];
+
+          if (result.status === "ERROR") {
+            console.log(`⏭️  [SCHEDULER] Skipped ${modelKey} (status: ERROR)`);
+            continue;
+          }
+
+          try {
+            // CRITICAL GUARD: Never save with undefined model key
+            if (!modelKey || modelKey === "undefined") {
+              console.error(`❌ [SCHEDULER] Refusing to save: invalid modelKey "${modelKey}"`);
+              continue;
             }
+            if (!result.model || result.model === "undefined") {
+              console.error(`❌ [SCHEDULER] Refusing to save: result.model is "${result.model}". This would create an undefined key.`);
+              continue;
+            }
+
+            console.log(`💾 [SCHEDULER] Storing ${result.model} result to database`);
+
+            await AIVisibilityLog.create({
+              userId,
+              brandName,
+              keyword,
+              status: result.status,
+              rank: result.rank,
+              totalRecommendations: result.totalRecommendations,
+              mentionSnippet: result.mentionSnippet,
+              matchedAs: result.matchedAs,
+              model: result.model,  // Use result.model (validated by utility)
+              rawResponse: result.rawResponse,
+              checkedAt
+            });
+          } catch (saveErr) {
+            console.error(`❌ Failed to save ${modelKey} log:`, saveErr.message);
           }
         }
 

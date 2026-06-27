@@ -1,9 +1,17 @@
-export async function checkBrandVisibility(prompt, model, allNames) {
+export async function checkBrandVisibility(prompt, model, allNames, retryCount = 0, maxRetries = 1) {
   const geminiKey = process.env.GEMINI_API_KEY;
   const openrouterKey = process.env.OPENROUTER_API_KEY;
 
+  // Primary model for llama: Gemma 3 (faster, better free tier limits)
+  // Fallback: Deepseek (if Gemma is also rate-limited)
+  const LLAMA_MODELS = [
+    "google/gemma-3-27b-it:free",      // Primary
+    "deepseek/deepseek-chat-v3:free"   // Fallback
+  ];
+
   let aiResponse = "";
   let rawResponse = "";
+  let modelUsed = model;
 
   if (model === "gemini") {
     if (!geminiKey) throw new Error("Gemini API key not configured");
@@ -30,13 +38,19 @@ export async function checkBrandVisibility(prompt, model, allNames) {
   } else if (model === "llama") {
     if (!openrouterKey) throw new Error("OpenRouter API key not configured");
 
-    console.log("🔄 [OPENROUTER] Preparing Llama API call...");
+    console.log("🔄 [OPENROUTER] Preparing alternative model API call...");
     console.log(`📋 [OPENROUTER] API Key configured: ${openrouterKey ? "✅ YES (length: " + openrouterKey.length + ")" : "❌ NO"}`);
-    console.log(`📋 [OPENROUTER] Using model: meta-llama/llama-3.3-70b-instruct:free`);
+    console.log(`📋 [OPENROUTER] Primary model: ${LLAMA_MODELS[0]}`);
+    console.log(`📋 [OPENROUTER] Fallback model: ${LLAMA_MODELS[1]}`);
     console.log(`📋 [OPENROUTER] Prompt length: ${prompt.length} chars`);
+    console.log(`📋 [OPENROUTER] Attempt: ${retryCount + 1}/${maxRetries + 1}`);
+
+    // Try primary model, fall back if rate limited
+    const modelToUse = retryCount === 0 ? LLAMA_MODELS[0] : LLAMA_MODELS[1];
+    console.log(`🎯 [OPENROUTER] Using model: ${modelToUse}`);
 
     const requestBody = {
-      model: "meta-llama/llama-3.3-70b-instruct:free",
+      model: modelToUse,
       messages: [{ role: "user", content: prompt }]
     };
 
@@ -69,15 +83,15 @@ export async function checkBrandVisibility(prompt, model, allNames) {
       console.error(`❌ [OPENROUTER] HTTP ${openrouterRes.status}:`);
       console.error(`   Response: ${errText.substring(0, 300)}`);
 
-      // Handle rate limiting with retry
-      if (openrouterRes.status === 429) {
+      // Handle rate limiting with retry (max 1 retry)
+      if (openrouterRes.status === 429 && retryCount < maxRetries) {
         const retryAfter = openrouterRes.headers.get('Retry-After') || 25;
-        console.warn(`⏳ [OPENROUTER] Rate limited. Waiting ${retryAfter}s before retry...`);
-        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        console.warn(`⏳ [OPENROUTER] Rate limited. Waiting ${retryAfter}s before retry (attempt ${retryCount + 2}/${maxRetries + 1})...`);
+        await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 30000)));
         console.log(`🔄 [OPENROUTER] Retrying after rate limit...`);
 
-        // Recursive retry - call the function again
-        return checkBrandVisibility(prompt, model, allNames);
+        // Recursive retry - call the function again with incremented retryCount
+        return checkBrandVisibility(prompt, model, allNames, retryCount + 1, maxRetries);
       }
 
       throw new Error(`OpenRouter API error (${openrouterRes.status}): ${errText.substring(0, 200)}`);
@@ -132,12 +146,21 @@ export async function checkBrandVisibility(prompt, model, allNames) {
   if (totalRecommendations === 0) totalRecommendations = 5;
   const isVisible = rank !== null;
 
-  return {
+  // CRITICAL: Ensure model is NEVER undefined
+  if (!modelUsed || modelUsed === "undefined") {
+    throw new Error(`Internal error: model name is undefined (${modelUsed})`);
+  }
+
+  const result = {
     status: isVisible ? "VISIBLE" : "HIDDEN",
     rank,
     totalRecommendations,
     mentionSnippet,
     matchedAs,
-    rawResponse: aiResponse
+    rawResponse: aiResponse,
+    model: modelUsed  // Use the tracked modelUsed, not the parameter
   };
+
+  console.log(`✅ [${modelUsed.toUpperCase()}] Check complete: ${result.status} ${result.rank ? `#${result.rank}` : ""}`);
+  return result;
 }
