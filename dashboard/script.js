@@ -563,20 +563,22 @@ const rankBadge = isVisible
   ? `<span class="ai-rank-badge">🏆 Rank #${data.rank}</span>`
   : "";
 
-// Internal details section
+// Internal details section with model source tracking
 let internalDetailsHTML = "";
 if (data.internalDetails) {
   const details = Object.entries(data.internalDetails).map(([model, result]) => {
     const modelIsVisible = result.status === "VISIBLE";
+    const sourceLabel = result.modelSource === "auto-router" ? "🔄 Auto-Router" : "📌 Pinned";
     return `
       <div class="internal-model-result" style="padding: 8px; margin: 4px 0; background: #f5f5f5; border-radius: 4px;">
-        <strong>${model.toUpperCase()}:</strong> ${modelIsVisible ? "✅ VISIBLE" : "❌ HIDDEN"} ${modelIsVisible ? `(Rank #${result.rank})` : ""}
+        <strong>${model.toUpperCase()}</strong> <span style="color: #999; font-size: 0.9em;">${sourceLabel}</span><br>
+        ${modelIsVisible ? "✅ VISIBLE" : "❌ HIDDEN"} ${modelIsVisible ? `(Rank #${result.rank})` : ""}
       </div>
     `;
   }).join("");
   internalDetailsHTML = `
     <details class="ai-internal-details" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0e0e0;">
-      <summary style="cursor: pointer; font-weight: 500; color: #666;">🔍 Internal Details</summary>
+      <summary style="cursor: pointer; font-weight: 500; color: #666;">🔍 Internal Details (Shows if pinned or auto-router fallback was used)</summary>
       <div style="margin-top: 8px;">
         ${details}
       </div>

@@ -9,6 +9,7 @@ const aiVisibilityLogSchema = new mongoose.Schema({
   mentionSnippet: { type: String, default: "Not mentioned" },
   matchedAs: { type: String, default: null },
   model: { type: String, enum: ["gemini", "llama"], required: true },
+  modelSource: { type: String, enum: ["pinned", "auto-router"], default: "pinned" },
   rawResponse: { type: String, default: "" },
   checkedAt: { type: Date, default: Date.now }
 

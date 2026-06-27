@@ -2,13 +2,15 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
   const geminiKey = process.env.GEMINI_API_KEY;
   const openrouterKey = process.env.OPENROUTER_API_KEY;
 
-  // OpenRouter's auto-routing free model: automatically selects the best available free model
-  // No need to hardcode specific providers (Llama, Gemma, DeepSeek, Mistral) — they keep getting deprecated
-  const OPENROUTER_FREE_MODEL = "openrouter/free";
+  // Pinned primary model: ensures consistent results day-to-day
+  // Falls back to auto-router if this model becomes unavailable or fails
+  const PINNED_FREE_MODEL = "liquid/lfm-2.5-1.2b-instruct:free";
+  const OPENROUTER_AUTO_ROUTER = "openrouter/free";
 
   let aiResponse = "";
   let rawResponse = "";
   let modelUsed = model;
+  let modelSource = "unknown";  // Track: "pinned" or "auto-router"
 
   if (model === "gemini") {
     if (!geminiKey) throw new Error("Gemini API key not configured");
@@ -35,16 +37,28 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
   } else if (model === "llama") {
     if (!openrouterKey) throw new Error("OpenRouter API key not configured");
 
-    console.log("🔄 [OPENROUTER] Calling auto-routing free model...");
+    console.log("🔄 [OPENROUTER] Calling free model (pinned with auto-router fallback)...");
     console.log(`📋 [OPENROUTER] API Key configured: ${openrouterKey ? "✅ YES (length: " + openrouterKey.length + ")" : "❌ NO"}`);
-    console.log(`📋 [OPENROUTER] Using auto-router: ${OPENROUTER_FREE_MODEL} (auto-selects available provider)`);
+    console.log(`📋 [OPENROUTER] Primary model (pinned): ${PINNED_FREE_MODEL}`);
+    console.log(`📋 [OPENROUTER] Fallback (auto-router): ${OPENROUTER_AUTO_ROUTER}`);
     console.log(`📋 [OPENROUTER] Prompt length: ${prompt.length} chars`);
     if (retryCount > 0) {
       console.log(`📋 [OPENROUTER] Retry attempt: ${retryCount + 1}/${maxRetries + 1}`);
     }
 
+    // Determine which model to use based on retry count
+    // Retry 0: try pinned model
+    // Retry 1+: use auto-router fallback
+    const useAutoRouter = retryCount > 0;
+    const modelToUse = useAutoRouter ? OPENROUTER_AUTO_ROUTER : PINNED_FREE_MODEL;
+    modelSource = useAutoRouter ? "auto-router" : "pinned";
+
+    if (useAutoRouter) {
+      console.log(`⚠️  [OPENROUTER] Pinned model failed, falling back to auto-router...`);
+    }
+
     const requestBody = {
-      model: OPENROUTER_FREE_MODEL,
+      model: modelToUse,
       messages: [{ role: "user", content: prompt }],
       max_tokens: 1024,  // ✅ Ensure reasoning models have budget for answer after thinking
       reasoning: { effort: "low" }  // ✅ Cap reasoning budget so tokens left for actual answer
@@ -79,20 +93,30 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
       console.error(`❌ [OPENROUTER] HTTP ${openrouterRes.status}:`);
       console.error(`   Response: ${errText.substring(0, 300)}`);
 
-      // Retry on rate limiting (free pool temporarily saturated)
-      // openrouter/free handles model selection internally, so no manual fallback needed
-      if (openrouterRes.status === 429 && retryCount < maxRetries) {
-        const retryAfter = openrouterRes.headers.get('Retry-After') || 25;
-        console.warn(`⏳ [OPENROUTER] Free pool rate limited. Waiting ${retryAfter}s before retry (attempt ${retryCount + 2}/${maxRetries + 1})...`);
-        await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 30000)));
-        console.log(`🔄 [OPENROUTER] Retrying after rate limit...`);
+      // Fallback to auto-router if pinned model fails (non-200, 404, 429, 5xx, etc.)
+      if (!useAutoRouter && retryCount < maxRetries) {
+        const reason = openrouterRes.status === 429
+          ? "rate limited"
+          : openrouterRes.status === 404
+          ? "model unavailable"
+          : `HTTP ${openrouterRes.status}`;
 
-        // Recursive retry - call the function again with incremented retryCount
+        console.warn(`⚠️  [OPENROUTER] Pinned model failed (${reason}). Falling back to auto-router...`);
+
+        // If 429, wait before retrying
+        if (openrouterRes.status === 429) {
+          const retryAfter = openrouterRes.headers.get('Retry-After') || 25;
+          console.warn(`⏳ [OPENROUTER] Waiting ${retryAfter}s before fallback retry...`);
+          await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 30000)));
+        }
+
+        console.log(`🔄 [OPENROUTER] Retrying with auto-router (attempt ${retryCount + 2}/${maxRetries + 1})...`);
+
+        // Recursive call with incremented retryCount to use auto-router fallback
         return checkBrandVisibility(prompt, model, allNames, retryCount + 1, maxRetries);
       }
 
-      // For other errors (404, 5xx, etc.), fail immediately
-      // openrouter/free would have already tried available models internally
+      // Final failure: both pinned model and auto-router have failed
       throw new Error(`OpenRouter API error (${openrouterRes.status}): ${errText.substring(0, 200)}`);
     }
 
@@ -116,13 +140,26 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
     // (happens with reasoning models like Nemotron when thinking budget exceeds answer budget)
     if (!aiResponse) {
       const reasoning = message?.reasoning || message?.reasoning_content || "";
+
+      // If we have reasoning content, use it
       if (reasoning) {
         console.warn(`⚠️  [OPENROUTER] Response had only reasoning, no final answer. Using reasoning as fallback.`);
         console.warn(`   This indicates token budget was exhausted before model could write its answer.`);
         console.warn(`   Consider increasing max_tokens further or disabling reasoning for this model.`);
         aiResponse = reasoning;
-      } else {
-        console.error("❌ [OPENROUTER] Response missing both content AND reasoning");
+      }
+      // If pinned model returned completely empty, fall back to auto-router
+      else if (!useAutoRouter && retryCount < maxRetries) {
+        console.error("❌ [OPENROUTER] Pinned model returned empty response (no content or reasoning)");
+        console.warn(`⚠️  [OPENROUTER] Falling back to auto-router due to empty response...`);
+        console.log(`🔄 [OPENROUTER] Retrying with auto-router (attempt ${retryCount + 2}/${maxRetries + 1})...`);
+
+        // Recursive call with incremented retryCount to use auto-router fallback
+        return checkBrandVisibility(prompt, model, allNames, retryCount + 1, maxRetries);
+      }
+      // Final failure: empty response on both pinned and auto-router
+      else {
+        console.error("❌ [OPENROUTER] Response missing content/reasoning on both pinned and auto-router models");
         console.error(`   Full response: ${JSON.stringify(openrouterData).substring(0, 300)}`);
         throw new Error("OpenRouter returned empty response (no content or reasoning)");
       }
@@ -172,9 +209,10 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
     mentionSnippet,
     matchedAs,
     rawResponse: aiResponse,
-    model: modelUsed  // Use the tracked modelUsed, not the parameter
+    model: modelUsed,       // Use the tracked modelUsed
+    modelSource: modelSource  // ✅ Track: "pinned" or "auto-router" for consistency tracking
   };
 
-  console.log(`✅ [${modelUsed.toUpperCase()}] Check complete: ${result.status} ${result.rank ? `#${result.rank}` : ""}`);
+  console.log(`✅ [${modelUsed.toUpperCase()}] Check complete: ${result.status} ${result.rank ? `#${result.rank}` : ""} (source: ${modelSource})`);
   return result;
 }

@@ -422,6 +422,7 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
           mentionSnippet: result.mentionSnippet,
           matchedAs: result.matchedAs,
           model: result.model,  // Use result.model (validated by utility)
+          modelSource: result.modelSource || "pinned",  // Track: pinned or auto-router
           rawResponse: result.rawResponse,
           checkedAt
         });
@@ -504,7 +505,8 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
         rank: log.rank,
         totalRecommendations: log.totalRecommendations,
         mentionSnippet: log.mentionSnippet,
-        matchedAs: log.matchedAs
+        matchedAs: log.matchedAs,
+        modelSource: log.modelSource || "pinned"  // Track source: pinned or auto-router
       };
     }
 
@@ -673,6 +675,7 @@ async function runAIVisibilityChecks() {
               mentionSnippet: result.mentionSnippet,
               matchedAs: result.matchedAs,
               model: result.model,  // Use result.model (validated by utility)
+              modelSource: result.modelSource || "pinned",  // Track: pinned or auto-router
               rawResponse: result.rawResponse,
               checkedAt
             });
