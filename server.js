@@ -13,6 +13,7 @@ import { MONITORING_CONFIG, validateEnvironment } from "./config.js";
 import { logError, performHealthCheck, ERROR_LEVELS } from "./utils/errorHandler.js";
 import { DataCleanup, startCleanupScheduler } from "./utils/dataCleanup.js";
 import { authenticateToken, generateToken } from "./utils/auth.js";
+import { checkBrandVisibility } from "./utils/aiVisibility.js";
 
 import monitorModule, { addNewWebsite, removeWebsite } from "./monitor.js"; // importing monitor starts monitoring in that module
 import AIVisibilityLog from "./models/AIVisibilityLog.js";
@@ -335,18 +336,8 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
       });
     }
 
-    // build full list of names to check — brand + all aliases
     const allNames = [brandName, ...aliases.map(a => a.trim()).filter(a => a !== "")];
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({
-        success: false,
-        message: "Gemini API key not configured"
-      });
-    }
-
-    // Build the prompt — ask for numbered list so we can detect rank
     const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a numbered list of exactly 5 top recommendations with a brief reason for each. Format strictly as:
 1. BrandName: reason
 2. BrandName: reason
@@ -354,95 +345,59 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
 4. BrandName: reason
 5. BrandName: reason`;
 
-    // Call Gemini API
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
-    );
+    const results = {};
+    const models = ["gemini", "llama"];
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error("Gemini API error:", errText);
-      return res.status(500).json({
-        success: false,
-        message: "Gemini API call failed"
-      });
+    for (const model of models) {
+      try {
+        const result = await checkBrandVisibility(prompt, model, allNames);
+        results[model] = result;
+        console.log(`✅ ${model}: "${brandName}" for "${keyword}" → ${result.status} ${result.rank ? `#${result.rank}` : ""}`);
+      } catch (err) {
+        console.error(`❌ ${model} check failed:`, err.message);
+        results[model] = { status: "ERROR", error: err.message };
+      }
     }
 
-    const geminiData = await geminiRes.json();
-    const aiResponse = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const checkedAt = new Date();
 
-    // ── Rank detection with alias support ──
-    const lines = aiResponse.split("\n").filter(l => l.trim() !== "");
-    let rank = null;
-    let totalRecommendations = 0;
-    let mentionSnippet = "Not mentioned";
-    let matchedAs = null;
-
-    lines.forEach(line => {
-      const numberMatch = line.match(/^(\d+)[.)]/);
-      if (numberMatch) {
-        totalRecommendations++;
-        const position = parseInt(numberMatch[1]);
-        // check brand AND all aliases
-        for (const name of allNames) {
-          if (line.toLowerCase().includes(name.toLowerCase())) {
-            rank = position;
-            mentionSnippet = line.trim();
-            matchedAs = name;
-            break;
-          }
+    // Save logs for both models
+    for (const model of models) {
+      if (results[model].status !== "ERROR") {
+        try {
+          await AIVisibilityLog.create({
+            userId: req.userId,
+            brandName,
+            keyword,
+            status: results[model].status,
+            rank: results[model].rank,
+            totalRecommendations: results[model].totalRecommendations,
+            mentionSnippet: results[model].mentionSnippet,
+            matchedAs: results[model].matchedAs,
+            model,
+            rawResponse: results[model].rawResponse,
+            checkedAt
+          });
+        } catch (saveErr) {
+          console.error(`Failed to save ${model} log:`, saveErr.message);
         }
       }
-    });
+    }
 
-    // fallback if prompt format wasn't followed strictly
-    if (totalRecommendations === 0) totalRecommendations = 5;
+    // Compute aggregated response
+    const visibleResults = Object.values(results).filter(r => r.status === "VISIBLE");
+    const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
+    const aggregatedStatus = visibleResults.length > 0 ? `Visible in ${visibleResults.length} of ${models.length}` : `Not visible in any model`;
 
-    const isVisible = rank !== null;
-
-    console.log(`🤖 AI Visibility — Brand: "${brandName}", Keyword: "${keyword}", Rank: ${rank ?? "not found"}/${totalRecommendations}`);
-     
-    // Save result to MongoDB
-try {
-  await AIVisibilityLog.create({
-    userId: req.userId,
-    brandName,
-    keyword,
-    status: isVisible ? "VISIBLE" : "HIDDEN",
-    rank,
-    totalRecommendations,
-    mentionSnippet,
-    matchedAs,
-    checkedAt: new Date()
-  });
-  console.log(`💾 AI visibility result saved to DB`);
-} catch (saveErr) {
-  console.error("Failed to save AI visibility log:", saveErr.message);
-  // don't fail the request if save fails
-}
-
-
-
-
-
- res.json({
+    res.json({
       success: true,
       brandName,
       keyword,
-      status: isVisible ? "VISIBLE" : "HIDDEN",
-      rank,
-      totalRecommendations,
-      mentionSnippet,
-      matchedAs,
-      rawResponse: aiResponse,
-      checkedAt: new Date().toISOString()
+      status: aggregatedStatus,
+      rank: bestRank,
+      modelsChecked: models.length,
+      checkedAt: checkedAt.toISOString(),
+      internalDetails: results
     });
 
   } catch (err) {
@@ -460,17 +415,50 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
   try {
     const { brandName, keyword } = req.query;
 
-    // build filter — optionally filter by brand/keyword
     const filter = { userId: req.userId };
     if (brandName) filter.brandName = new RegExp(brandName, "i");
     if (keyword) filter.keyword = new RegExp(keyword, "i");
 
-    const logs = await AIVisibilityLog.find(filter)
+    const rawLogs = await AIVisibilityLog.find(filter)
       .sort({ checkedAt: -1 })
-      .limit(50)
+      .limit(100)
       .lean();
 
-    res.json({ success: true, history: logs });
+    // Group by (brandName, keyword, checkedAt) to get batches of 2 model results
+    const grouped = {};
+    for (const log of rawLogs) {
+      const key = `${log.brandName}|${log.keyword}|${log.checkedAt.getTime()}`;
+      if (!grouped[key]) {
+        grouped[key] = { brandName: log.brandName, keyword: log.keyword, checkedAt: log.checkedAt, models: {} };
+      }
+      grouped[key].models[log.model] = {
+        status: log.status,
+        rank: log.rank,
+        totalRecommendations: log.totalRecommendations,
+        mentionSnippet: log.mentionSnippet,
+        matchedAs: log.matchedAs
+      };
+    }
+
+    // Create aggregated history
+    const history = Object.values(grouped).map(batch => {
+      const visibleModels = Object.values(batch.models).filter(m => m.status === "VISIBLE");
+      const bestRank = visibleModels.length > 0 ? Math.min(...visibleModels.map(m => m.rank)) : null;
+      const visibleCount = visibleModels.length;
+      const totalModels = Object.keys(batch.models).length;
+
+      return {
+        brandName: batch.brandName,
+        keyword: batch.keyword,
+        checkedAt: batch.checkedAt,
+        status: visibleCount > 0 ? `Visible in ${visibleCount} of ${totalModels}` : "Not visible",
+        rank: bestRank,
+        modelsChecked: totalModels,
+        internalDetails: batch.models
+      };
+    });
+
+    res.json({ success: true, history });
   } catch (err) {
     console.error("AI visibility history error:", err.message);
     res.status(500).json({ success: false, message: "Failed to fetch history" });
@@ -550,12 +538,6 @@ app.delete("/api/ai-visibility/monitor/:id", authenticateToken, async (req, res)
 async function runAIVisibilityChecks() {
   console.log("🤖 Running scheduled AI visibility checks...");
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error("❌ Gemini API key not configured — skipping AI visibility checks");
-    return;
-  }
-
   try {
     const monitors = await AIVisibilityMonitor.find({ isActive: true });
     console.log(`📋 Found ${monitors.length} active AI visibility monitors`);
@@ -572,68 +554,49 @@ async function runAIVisibilityChecks() {
 4. BrandName: reason
 5. BrandName: reason`;
 
-        const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }]
-            })
-          }
-        );
+        const results = {};
+        const models = ["gemini", "llama"];
 
-        if (!geminiRes.ok) {
-          console.error(`❌ Gemini failed for "${brandName}+${keyword}"`);
-          continue; // skip this one, try next
+        for (const model of models) {
+          try {
+            const result = await checkBrandVisibility(prompt, model, allNames);
+            results[model] = result;
+          } catch (err) {
+            console.error(`❌ ${model} check failed:`, err.message);
+            results[model] = { status: "ERROR", error: err.message };
+          }
         }
 
-        const geminiData = await geminiRes.json();
-        const aiResponse = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const checkedAt = new Date();
 
-        // rank detection
-        const lines = aiResponse.split("\n").filter(l => l.trim() !== "");
-        let rank = null;
-        let totalRecommendations = 0;
-        let mentionSnippet = "Not mentioned";
-        let matchedAs = null;
-
-        lines.forEach(line => {
-          const numberMatch = line.match(/^(\d+)[.)]/);
-          if (numberMatch) {
-            totalRecommendations++;
-            const position = parseInt(numberMatch[1]);
-            for (const name of allNames) {
-              if (line.toLowerCase().includes(name.toLowerCase())) {
-                rank = position;
-                mentionSnippet = line.trim();
-                matchedAs = name;
-                break;
-              }
+        // Save logs for both models
+        for (const model of models) {
+          if (results[model].status !== "ERROR") {
+            try {
+              await AIVisibilityLog.create({
+                userId,
+                brandName,
+                keyword,
+                status: results[model].status,
+                rank: results[model].rank,
+                totalRecommendations: results[model].totalRecommendations,
+                mentionSnippet: results[model].mentionSnippet,
+                matchedAs: results[model].matchedAs,
+                model,
+                rawResponse: results[model].rawResponse,
+                checkedAt
+              });
+            } catch (saveErr) {
+              console.error(`Failed to save ${model} log:`, saveErr.message);
             }
           }
-        });
-
-        if (totalRecommendations === 0) totalRecommendations = 5;
-        const isVisible = rank !== null;
-
-        // save result
-    await AIVisibilityLog.create({
-          userId,
-          brandName,
-          keyword,
-          status: isVisible ? "VISIBLE" : "HIDDEN",
-          rank,
-          totalRecommendations,
-          mentionSnippet,
-          matchedAs,
-          checkedAt: new Date()
-        });
+        }
 
         // update lastCheckedAt
         await AIVisibilityMonitor.findByIdAndUpdate(_id, { lastCheckedAt: new Date() });
 
-        console.log(`✅ Auto-checked "${brandName}" for "${keyword}" → ${isVisible ? `VISIBLE #${rank}` : "HIDDEN"}`);
+        const visibleResults = Object.values(results).filter(r => r.status === "VISIBLE");
+        console.log(`✅ Auto-checked "${brandName}" for "${keyword}" → ${visibleResults.length}/${models.length} models`);
 
         // wait 2 seconds between checks to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -667,15 +630,30 @@ app.get("/api/ai-visibility/trend", authenticateToken, async (req, res) => {
       brandName: new RegExp(`^${brandName}$`, "i"),
       keyword: new RegExp(`^${keyword}$`, "i")
     })
-      .sort({ checkedAt: 1 }) // oldest first for chart
-      .limit(30)
+      .sort({ checkedAt: 1 })
+      .limit(60)
       .lean();
 
-    const trend = logs.map(log => ({
-      date: new Date(log.checkedAt).toLocaleDateString(),
-      rank: log.rank,
-      status: log.status
-    }));
+    // Group by timestamp to aggregate model results
+    const grouped = {};
+    for (const log of logs) {
+      const key = log.checkedAt.getTime();
+      if (!grouped[key]) {
+        grouped[key] = { checkedAt: log.checkedAt, models: [] };
+      }
+      grouped[key].models.push({ status: log.status, rank: log.rank });
+    }
+
+    const trend = Object.values(grouped).map(batch => {
+      const visibleModels = batch.models.filter(m => m.status === "VISIBLE");
+      const bestRank = visibleModels.length > 0 ? Math.min(...visibleModels.map(m => m.rank)) : null;
+      return {
+        date: new Date(batch.checkedAt).toLocaleDateString(),
+        rank: bestRank,
+        status: visibleModels.length > 0 ? "VISIBLE" : "HIDDEN",
+        visibleIn: visibleModels.length
+      };
+    });
 
     res.json({ success: true, trend, brandName, keyword });
   } catch (err) {

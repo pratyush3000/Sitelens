@@ -1,13 +1,15 @@
 import mongoose from "mongoose";
-const aiVisibilityLogSchema = new mongoose.Schema({ 
+const aiVisibilityLogSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   brandName: { type: String, required: true },
   keyword: { type: String, required: true },
   status: { type: String, enum: ["VISIBLE", "HIDDEN"], required: true },
   rank: { type: Number, default: null },
   totalRecommendations: { type: Number, default: 5 },
- mentionSnippet: { type: String, default: "Not mentioned" },
-  matchedAs: { type: String, default: null }, // which name/alias actually matched
+  mentionSnippet: { type: String, default: "Not mentioned" },
+  matchedAs: { type: String, default: null },
+  model: { type: String, enum: ["gemini", "llama"], required: true },
+  rawResponse: { type: String, default: "" },
   checkedAt: { type: Date, default: Date.now }
 
 });

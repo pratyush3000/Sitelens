@@ -534,7 +534,7 @@ window.checkVisibility = async function() {
   // Show loading state
   resultsDiv.innerHTML = `
     <div class="ai-result-card loading">
-      <div class="ai-checking">⏳ Asking Gemini about "${keyword}"...</div>
+      <div class="ai-checking">⏳ Checking Gemini & Llama about "${keyword}"...</div>
     </div>
   `;
 
@@ -555,13 +555,34 @@ window.checkVisibility = async function() {
       return;
     }
 
-const isVisible = data.status === "VISIBLE";
+const isVisible = data.rank !== null;
 const checkedAt = new Date(data.checkedAt).toLocaleString();
 
 // rank badge
 const rankBadge = isVisible
-  ? `<span class="ai-rank-badge">🏆 Rank #${data.rank} of ${data.totalRecommendations}</span>`
+  ? `<span class="ai-rank-badge">🏆 Rank #${data.rank}</span>`
   : "";
+
+// Internal details section
+let internalDetailsHTML = "";
+if (data.internalDetails) {
+  const details = Object.entries(data.internalDetails).map(([model, result]) => {
+    const modelIsVisible = result.status === "VISIBLE";
+    return `
+      <div class="internal-model-result" style="padding: 8px; margin: 4px 0; background: #f5f5f5; border-radius: 4px;">
+        <strong>${model.toUpperCase()}:</strong> ${modelIsVisible ? "✅ VISIBLE" : "❌ HIDDEN"} ${modelIsVisible ? `(Rank #${result.rank})` : ""}
+      </div>
+    `;
+  }).join("");
+  internalDetailsHTML = `
+    <details class="ai-internal-details" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0e0e0;">
+      <summary style="cursor: pointer; font-weight: 500; color: #666;">🔍 Internal Details</summary>
+      <div style="margin-top: 8px;">
+        ${details}
+      </div>
+    </details>
+  `;
+}
 
 const card = document.createElement("div");
 card.className = `ai-result-card ${isVisible ? "visible" : "hidden-result"}`;
@@ -570,18 +591,15 @@ card.innerHTML = `
     <span class="ai-brand">${data.brandName}</span>
     <div class="ai-badges">
       <span class="ai-badge ${isVisible ? "badge good" : "badge bad"}">
-        ${isVisible ? "✅ VISIBLE" : "❌ HIDDEN"}
+        ${isVisible ? "✅ VISIBLE" : "❌ NOT VISIBLE"}
       </span>
       ${rankBadge}
     </div>
   </div>
   <div class="ai-keyword">🔍 Keyword: "${data.keyword}"</div>
-  <div class="ai-snippet">${isVisible ? `💬 "${data.mentionSnippet}"` : "Your brand was not mentioned in the AI response."}</div>
+  <div class="ai-status">📊 ${data.status}</div>
   <div class="ai-time">🕐 Checked at ${checkedAt}</div>
-  <details class="ai-raw">
-    <summary>See full AI response</summary>
-    <div class="ai-raw-content">${data.rawResponse}</div>
-  </details>
+  ${internalDetailsHTML}
 `;
 
     // Clear loading and add result
@@ -625,20 +643,22 @@ async function loadAIHistory() {
           </tr>
         </thead>
         <tbody>
-          ${data.history.map(log => `
+          ${data.history.map(log => {
+            const isVisible = log.rank !== null;
+            return `
             <tr>
               <td>${log.brandName}</td>
               <td>${log.keyword}</td>
               <td>
-                <span class="${log.status === "VISIBLE" ? "badge good" : "badge bad"}">
-                  ${log.status === "VISIBLE" ? "✅ VISIBLE" : "❌ HIDDEN"}
+                <span class="${isVisible ? "badge good" : "badge bad"}">
+                  ${log.status}
                 </span>
-                ${log.matchedAs ? `<div class="ai-aliases">matched as: ${log.matchedAs}</div>` : ""}
               </td>
-              <td>${log.rank ? `#${log.rank} of ${log.totalRecommendations}` : "—"}</td>
+              <td>${log.rank ? `#${log.rank}` : "—"}</td>
               <td>${new Date(log.checkedAt).toLocaleString()}</td>
             </tr>
-          `).join("")}
+          `;
+          }).join("")}
         </tbody>
       </table>
     `;
