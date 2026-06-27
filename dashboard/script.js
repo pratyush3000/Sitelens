@@ -440,10 +440,40 @@ window.loadSiteReport = async function(site, range) {
   }
 };
 
-window.downloadSiteReport = function(site, range) {
-  const encoded = encodeURIComponent(site);
-  const url = `/api/report/${encoded}/download?range=${range}`;
-  window.location.href = url;
+window.downloadSiteReport = async function(site, range) {
+  try {
+    const encoded = encodeURIComponent(site);
+    const url = `/api/report/${encoded}/download?range=${range}`;
+
+    // Fetch with auth headers
+    const res = await fetch(url, {
+      headers: authHeaders()
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      alert(`Error: ${data.message || 'Failed to download report'}`);
+      return;
+    }
+
+    // Get the PDF as a blob
+    const blob = await res.blob();
+
+    // Create a download link and click it
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${site}-report-${range}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(downloadUrl);
+
+    console.log(`✅ Downloaded report for ${site} (${range})`);
+  } catch (err) {
+    console.error('Download error:', err);
+    alert('Failed to download report. Check console for details.');
+  }
 };
 
 window.getCurrentReportRange = function() {
