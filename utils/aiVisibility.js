@@ -45,7 +45,9 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
 
     const requestBody = {
       model: OPENROUTER_FREE_MODEL,
-      messages: [{ role: "user", content: prompt }]
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 1024,  // ✅ Ensure reasoning models have budget for answer after thinking
+      reasoning: { effort: "low" }  // ✅ Cap reasoning budget so tokens left for actual answer
     };
 
     console.log(`🚀 [OPENROUTER] Sending request to https://openrouter.ai/api/v1/chat/completions`);
@@ -102,13 +104,28 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
       throw new Error(`OpenRouter response is not valid JSON`);
     }
 
+    // Log which model OpenRouter's auto-router selected
+    const selectedModel = openrouterData?.model || "unknown";
+    console.log(`📦 [OPENROUTER] Auto-router selected: ${selectedModel}`);
     console.log(`📦 [OPENROUTER] Response keys:`, Object.keys(openrouterData));
-    aiResponse = openrouterData?.choices?.[0]?.message?.content || "";
 
+    const message = openrouterData?.choices?.[0]?.message;
+    aiResponse = message?.content || "";
+
+    // Fallback: if content is empty, check if model returned reasoning instead
+    // (happens with reasoning models like Nemotron when thinking budget exceeds answer budget)
     if (!aiResponse) {
-      console.error("❌ [OPENROUTER] Response missing content at choices[0].message.content");
-      console.error(`   Full response: ${JSON.stringify(openrouterData).substring(0, 300)}`);
-      throw new Error("OpenRouter returned empty response");
+      const reasoning = message?.reasoning || message?.reasoning_content || "";
+      if (reasoning) {
+        console.warn(`⚠️  [OPENROUTER] Response had only reasoning, no final answer. Using reasoning as fallback.`);
+        console.warn(`   This indicates token budget was exhausted before model could write its answer.`);
+        console.warn(`   Consider increasing max_tokens further or disabling reasoning for this model.`);
+        aiResponse = reasoning;
+      } else {
+        console.error("❌ [OPENROUTER] Response missing both content AND reasoning");
+        console.error(`   Full response: ${JSON.stringify(openrouterData).substring(0, 300)}`);
+        throw new Error("OpenRouter returned empty response (no content or reasoning)");
+      }
     }
 
     rawResponse = JSON.stringify(openrouterData);
