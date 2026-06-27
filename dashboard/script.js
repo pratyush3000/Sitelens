@@ -405,7 +405,7 @@ window.loadSiteReport = async function(site, range) {
     // Render report summary
     summaryDiv.innerHTML = `
       <div style="background: #f9f9f9; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
-        <p style="margin: 0; font-size: 0.95em; line-height: 1.5;">${data.summary}</p>
+        <p style="margin: 0; font-size: 0.95em; line-height: 1.5; color: #1a1a1a;">${data.summary}</p>
       </div>
       <div class="drawer-stats-grid">
         <div class="drawer-stat">
