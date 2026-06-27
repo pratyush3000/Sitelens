@@ -2,11 +2,11 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
   const geminiKey = process.env.GEMINI_API_KEY;
   const openrouterKey = process.env.OPENROUTER_API_KEY;
 
-  // Primary model for llama: Gemma 3 (faster, better free tier limits)
-  // Fallback: Deepseek (if Gemma is also rate-limited)
+  // Primary model: Deepseek (free, reliable)
+  // Fallback: Mistral (if Deepseek is unavailable, rate-limited, or errors)
   const LLAMA_MODELS = [
-    "google/gemma-3-27b-it:free",      // Primary
-    "deepseek/deepseek-chat-v3:free"   // Fallback
+    "deepseek/deepseek-chat-v3:free",     // Primary
+    "mistralai/mistral-7b-instruct:free"  // Fallback
   ];
 
   let aiResponse = "";
@@ -83,17 +83,42 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
       console.error(`❌ [OPENROUTER] HTTP ${openrouterRes.status}:`);
       console.error(`   Response: ${errText.substring(0, 300)}`);
 
-      // Handle rate limiting with retry (max 1 retry)
-      if (openrouterRes.status === 429 && retryCount < maxRetries) {
-        const retryAfter = openrouterRes.headers.get('Retry-After') || 25;
-        console.warn(`⏳ [OPENROUTER] Rate limited. Waiting ${retryAfter}s before retry (attempt ${retryCount + 2}/${maxRetries + 1})...`);
-        await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 30000)));
-        console.log(`🔄 [OPENROUTER] Retrying after rate limit...`);
+      // Fallback to secondary model on ANY error (404, 429, 500, etc.)
+      if (retryCount < maxRetries) {
+        const currentModel = LLAMA_MODELS[retryCount];
+        const nextModel = LLAMA_MODELS[retryCount + 1];
 
-        // Recursive retry - call the function again with incremented retryCount
-        return checkBrandVisibility(prompt, model, allNames, retryCount + 1, maxRetries);
+        if (nextModel) {
+          // Log the reason for fallback
+          let reason = "";
+          switch (openrouterRes.status) {
+            case 404:
+              reason = "Model unavailable/deprecated";
+              break;
+            case 429:
+              reason = "Rate limited";
+              const retryAfter = openrouterRes.headers.get('Retry-After') || 25;
+              console.warn(`⏳ [OPENROUTER] Waiting ${retryAfter}s before fallback...`);
+              await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 30000)));
+              break;
+            case 500:
+            case 502:
+            case 503:
+              reason = "Server error";
+              break;
+            default:
+              reason = `HTTP ${openrouterRes.status}`;
+          }
+
+          console.warn(`⚠️  [OPENROUTER] Falling back from "${currentModel}" to "${nextModel}" (${reason})`);
+          console.log(`🔄 [OPENROUTER] Attempting fallback model (attempt ${retryCount + 2}/${maxRetries + 1})...`);
+
+          // Recursive call with incremented retryCount to use next model
+          return checkBrandVisibility(prompt, model, allNames, retryCount + 1, maxRetries);
+        }
       }
 
+      // No more fallback models available
       throw new Error(`OpenRouter API error (${openrouterRes.status}): ${errText.substring(0, 200)}`);
     }
 
