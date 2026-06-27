@@ -384,10 +384,16 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
       }
     }
 
-    // Compute aggregated response
-    const visibleResults = Object.values(results).filter(r => r.status === "VISIBLE");
+    // Filter out ERROR results and compute aggregation
+    const successfulResults = Object.fromEntries(
+      Object.entries(results).filter(([_, r]) => r.status !== "ERROR")
+    );
+    const visibleResults = Object.values(successfulResults).filter(r => r.status === "VISIBLE");
     const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
-    const aggregatedStatus = visibleResults.length > 0 ? `Visible in ${visibleResults.length} of ${models.length}` : `Not visible in any model`;
+    const successCount = Object.keys(successfulResults).length;
+    const aggregatedStatus = visibleResults.length > 0
+      ? `Visible in ${visibleResults.length} of ${successCount}`
+      : `Not visible in any model`;
 
     res.json({
       success: true,
@@ -395,9 +401,9 @@ app.post("/api/ai-visibility", authenticateToken, async (req, res) => {
       keyword,
       status: aggregatedStatus,
       rank: bestRank,
-      modelsChecked: models.length,
+      modelsChecked: successCount,
       checkedAt: checkedAt.toISOString(),
-      internalDetails: results
+      internalDetails: successfulResults
     });
 
   } catch (err) {
@@ -595,8 +601,12 @@ async function runAIVisibilityChecks() {
         // update lastCheckedAt
         await AIVisibilityMonitor.findByIdAndUpdate(_id, { lastCheckedAt: new Date() });
 
-        const visibleResults = Object.values(results).filter(r => r.status === "VISIBLE");
-        console.log(`✅ Auto-checked "${brandName}" for "${keyword}" → ${visibleResults.length}/${models.length} models`);
+        const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
+        const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
+        const errorCount = models.length - successfulResults.length;
+        const status = visibleResults.length > 0 ? `VISIBLE in ${visibleResults.length} of ${successfulResults.length}` : "HIDDEN";
+        const errorMsg = errorCount > 0 ? ` [${errorCount} model(s) failed]` : "";
+        console.log(`✅ Auto-checked "${brandName}" for "${keyword}" → ${status}${errorMsg}`);
 
         // wait 2 seconds between checks to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 2000));

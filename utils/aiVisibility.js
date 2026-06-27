@@ -30,6 +30,7 @@ export async function checkBrandVisibility(prompt, model, allNames) {
   } else if (model === "llama") {
     if (!openrouterKey) throw new Error("OpenRouter API key not configured");
 
+    console.log("🔄 Calling OpenRouter API for Llama...");
     const openrouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -44,12 +45,20 @@ export async function checkBrandVisibility(prompt, model, allNames) {
 
     if (!openrouterRes.ok) {
       const errText = await openrouterRes.text();
-      throw new Error(`OpenRouter API error: ${errText}`);
+      console.error(`❌ OpenRouter HTTP ${openrouterRes.status}:`, errText);
+      throw new Error(`OpenRouter API error (${openrouterRes.status}): ${errText.substring(0, 200)}`);
     }
 
     const openrouterData = await openrouterRes.json();
     aiResponse = openrouterData?.choices?.[0]?.message?.content || "";
+
+    if (!aiResponse) {
+      console.error("❌ OpenRouter response missing content:", JSON.stringify(openrouterData).substring(0, 200));
+      throw new Error("OpenRouter returned empty response");
+    }
+
     rawResponse = JSON.stringify(openrouterData);
+    console.log("✅ OpenRouter API call successful");
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
