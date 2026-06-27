@@ -935,6 +935,12 @@ window.showTrend = async function(brandName, keyword) {
     const colors = data.trend.map(d => d.status === "VISIBLE" ? "#10b981" : "#ef4444");
 
     const ctx = canvas.getContext("2d");
+
+    // Create gradient for line
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, "rgba(99, 102, 241, 0.3)");
+    gradient.addColorStop(1, "rgba(99, 102, 241, 0.01)");
+
     activeTrendChart = new Chart(ctx, {
       type: "line",
       data: {
@@ -943,22 +949,43 @@ window.showTrend = async function(brandName, keyword) {
           label: "Rank Position",
           data: ranks,
           borderColor: "#6366f1",
-          backgroundColor: "rgba(99,102,241,0.1)",
-          borderWidth: 2,
-          pointRadius: 6,
+          backgroundColor: gradient,
+          borderWidth: 3,
+          pointRadius: 8,
           pointBackgroundColor: colors,
-          pointBorderColor: colors,
-          pointHoverRadius: 8,
+          pointBorderColor: "white",
+          pointBorderWidth: 2,
+          pointHoverRadius: 12,
+          pointHoverBorderWidth: 3,
           fill: true,
-          tension: 0.3
+          tension: 0.4,
+          segment: {
+            borderDash: ctx => ctx.p0DataIndex !== undefined && (ranks[ctx.p0DataIndex] ?? 6) >= 6 ? [5, 5] : []
+          }
         }]
       },
       options: {
         responsive: true,
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
+            enabled: true,
+            backgroundColor: "rgba(0, 0, 0, 0.9)",
+            titleColor: "#fff",
+            bodyColor: "#fff",
+            borderColor: "#6366f1",
+            borderWidth: 2,
+            padding: 12,
+            cornerRadius: 6,
+            boxPadding: 6,
             callbacks: {
+              title: (ctx) => {
+                return `${ctx[0].label}`;
+              },
               label: ctx => {
                 const val = ctx.parsed.y;
                 return val >= 6 ? "❌ HIDDEN" : `✅ Rank #${val}`;
@@ -974,14 +1001,32 @@ window.showTrend = async function(brandName, keyword) {
             ticks: {
               stepSize: 1,
               color: "#9ca3af",
-              callback: v => v >= 6 ? "Hidden" : `#${v}`
+              font: { size: 11, weight: 500 },
+              callback: v => v >= 6 ? "🔴 Hidden" : `🏆 #${v}`
             },
-            grid: { color: "rgba(255,255,255,0.05)" }
+            grid: {
+              color: "rgba(255, 255, 255, 0.08)",
+              lineWidth: 1,
+              drawBorder: false
+            },
+            border: { display: false }
           },
           x: {
-            ticks: { color: "#9ca3af", maxTicksLimit: 10 },
-            grid: { color: "rgba(255,255,255,0.05)" }
+            ticks: {
+              color: "#9ca3af",
+              maxTicksLimit: 10,
+              font: { size: 11 }
+            },
+            grid: {
+              color: "rgba(255, 255, 255, 0.05)",
+              drawBorder: false
+            },
+            border: { display: false }
           }
+        },
+        animation: {
+          duration: 750,
+          easing: 'easeInOutQuart'
         }
       }
     });
