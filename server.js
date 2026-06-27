@@ -22,6 +22,17 @@ import AIVisibilityMonitor from "./models/AIVisibilityMonitor.js";
 await connectDB();
 validateEnvironment();
 
+// Verify API keys for AI visibility
+const geminiKey = process.env.GEMINI_API_KEY;
+const openrouterKey = process.env.OPENROUTER_API_KEY;
+console.log("\n🔐 [STARTUP] API Key Check:");
+console.log(`   GEMINI_API_KEY: ${geminiKey ? "✅ Loaded (" + geminiKey.length + " chars)" : "❌ NOT SET"}`);
+console.log(`   OPENROUTER_API_KEY: ${openrouterKey ? "✅ Loaded (" + openrouterKey.length + " chars)" : "❌ NOT SET"}`);
+if (!openrouterKey) {
+  console.warn("⚠️  [STARTUP] OpenRouter API key not configured - Llama checks will fail");
+}
+console.log();
+
 const app = express();
 const PORT = MONITORING_CONFIG.serverPort;
 

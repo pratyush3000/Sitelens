@@ -30,35 +30,78 @@ export async function checkBrandVisibility(prompt, model, allNames) {
   } else if (model === "llama") {
     if (!openrouterKey) throw new Error("OpenRouter API key not configured");
 
-    console.log("🔄 Calling OpenRouter API for Llama...");
-    const openrouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openrouterKey}`
-      },
-      body: JSON.stringify({
-        model: "meta-llama/llama-3.3-70b-instruct:free",
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
+    console.log("🔄 [OPENROUTER] Preparing Llama API call...");
+    console.log(`📋 [OPENROUTER] API Key configured: ${openrouterKey ? "✅ YES (length: " + openrouterKey.length + ")" : "❌ NO"}`);
+    console.log(`📋 [OPENROUTER] Using model: meta-llama/llama-3.3-70b-instruct:free`);
+    console.log(`📋 [OPENROUTER] Prompt length: ${prompt.length} chars`);
+
+    const requestBody = {
+      model: "meta-llama/llama-3.3-70b-instruct:free",
+      messages: [{ role: "user", content: prompt }]
+    };
+
+    console.log(`🚀 [OPENROUTER] Sending request to https://openrouter.ai/api/v1/chat/completions`);
+    console.log(`🔐 [OPENROUTER] Auth header: Bearer ${openrouterKey.substring(0, 10)}...${openrouterKey.substring(openrouterKey.length - 5)}`);
+
+    let openrouterRes;
+    try {
+      openrouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${openrouterKey}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+      console.log(`📥 [OPENROUTER] Response status: ${openrouterRes.status} ${openrouterRes.statusText}`);
+    } catch (fetchErr) {
+      console.error(`❌ [OPENROUTER] Network/Fetch error:`, fetchErr.message);
+      throw new Error(`OpenRouter fetch failed: ${fetchErr.message}`);
+    }
 
     if (!openrouterRes.ok) {
-      const errText = await openrouterRes.text();
-      console.error(`❌ OpenRouter HTTP ${openrouterRes.status}:`, errText);
+      let errText = "";
+      try {
+        errText = await openrouterRes.text();
+      } catch (e) {
+        errText = "(could not read error body)";
+      }
+      console.error(`❌ [OPENROUTER] HTTP ${openrouterRes.status}:`);
+      console.error(`   Response: ${errText.substring(0, 300)}`);
+
+      // Handle rate limiting with retry
+      if (openrouterRes.status === 429) {
+        const retryAfter = openrouterRes.headers.get('Retry-After') || 25;
+        console.warn(`⏳ [OPENROUTER] Rate limited. Waiting ${retryAfter}s before retry...`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        console.log(`🔄 [OPENROUTER] Retrying after rate limit...`);
+
+        // Recursive retry - call the function again
+        return checkBrandVisibility(prompt, model, allNames);
+      }
+
       throw new Error(`OpenRouter API error (${openrouterRes.status}): ${errText.substring(0, 200)}`);
     }
 
-    const openrouterData = await openrouterRes.json();
+    let openrouterData;
+    try {
+      openrouterData = await openrouterRes.json();
+    } catch (parseErr) {
+      console.error(`❌ [OPENROUTER] JSON parse error:`, parseErr.message);
+      throw new Error(`OpenRouter response is not valid JSON`);
+    }
+
+    console.log(`📦 [OPENROUTER] Response keys:`, Object.keys(openrouterData));
     aiResponse = openrouterData?.choices?.[0]?.message?.content || "";
 
     if (!aiResponse) {
-      console.error("❌ OpenRouter response missing content:", JSON.stringify(openrouterData).substring(0, 200));
+      console.error("❌ [OPENROUTER] Response missing content at choices[0].message.content");
+      console.error(`   Full response: ${JSON.stringify(openrouterData).substring(0, 300)}`);
       throw new Error("OpenRouter returned empty response");
     }
 
     rawResponse = JSON.stringify(openrouterData);
-    console.log("✅ OpenRouter API call successful");
+    console.log(`✅ [OPENROUTER] Success! Content length: ${aiResponse.length} chars`);
   } else {
     throw new Error(`Unknown model: ${model}`);
   }
