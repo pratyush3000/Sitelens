@@ -816,6 +816,271 @@ app.get("/api/incidents/:site", authenticateToken, async (req, res) => {
   }
 });
 
+// ==================== SITE REPORT (AGGREGATED STATS) ====================
+
+app.get("/api/report/:site", authenticateToken, async (req, res) => {
+  try {
+    const site = decodeURIComponent(req.params.site);
+    const range = req.query.range || "24h"; // 24h, 7d, 30d
+
+    // Calculate timeframe
+    const now = new Date();
+    let startTime;
+    switch (range) {
+      case "7d":
+        startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case "30d":
+        startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case "24h":
+      default:
+        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    }
+
+    // Fetch all logs for the site in the timeframe
+    const logs = await Log.find({
+      userId: req.userId,
+      website: site,
+      timestamp: { $gte: startTime, $lte: now }
+    }).sort({ timestamp: 1 }).lean();
+
+    if (logs.length === 0) {
+      return res.json({
+        success: true,
+        site,
+        range,
+        timeframeLabel: range === "7d" ? "last 7 days" : range === "30d" ? "last 30 days" : "last 24 hours",
+        uptime: 100,
+        avgResponseTime: 0,
+        minResponseTime: 0,
+        maxResponseTime: 0,
+        totalIncidents: 0,
+        totalDowntime: 0,
+        slowRequests: 0,
+        serverErrors: 0,
+        sslStatus: "unknown",
+        summary: `${site} has no data for the selected timeframe.`
+      });
+    }
+
+    // Calculate metrics
+    const totalTime = now.getTime() - startTime.getTime();
+    let downtimeMs = 0;
+    let isCurrentlyDown = false;
+    let downStartTime = null;
+
+    logs.forEach((log, idx) => {
+      if (log.messagetype === "down") {
+        isCurrentlyDown = true;
+        downStartTime = log.timestamp;
+      } else if (log.messagetype === "ok" && isCurrentlyDown) {
+        if (downStartTime) {
+          downtimeMs += log.timestamp.getTime() - downStartTime.getTime();
+        }
+        isCurrentlyDown = false;
+      }
+    });
+
+    // If still down, count until now
+    if (isCurrentlyDown && downStartTime) {
+      downtimeMs += now.getTime() - downStartTime.getTime();
+    }
+
+    const uptime = ((totalTime - downtimeMs) / totalTime) * 100;
+
+    // Response time stats
+    const responseTimes = logs
+      .filter(l => l.response_time_ms && l.messagetype === "ok")
+      .map(l => l.response_time_ms);
+    const avgResponseTime = responseTimes.length > 0
+      ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+      : 0;
+    const minResponseTime = responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
+    const maxResponseTime = responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
+
+    // Count incidents, slow requests, server errors
+    const incidents = logs.filter(l => l.messagetype === "down");
+    const slowRequests = logs.filter(l => l.response_time_ms > 2000).length;
+    const serverErrors = logs.filter(l => l.status_code >= 500).length;
+
+    // SSL status (most recent)
+    const sslStatus = logs[logs.length - 1]?.ssl_status || "unknown";
+
+    // Generate summary
+    const timeframeLabel = range === "7d" ? "last 7 days" : range === "30d" ? "last 30 days" : "last 24 hours";
+    const summary = `${site} was up ${uptime.toFixed(1)}% over the ${timeframeLabel}, with ${incidents.length} outage${incidents.length !== 1 ? "s" : ""} totaling ${Math.round(downtimeMs / 1000 / 60)} minutes.`;
+
+    res.json({
+      success: true,
+      site,
+      range,
+      timeframeLabel,
+      uptime: parseFloat(uptime.toFixed(2)),
+      avgResponseTime,
+      minResponseTime,
+      maxResponseTime,
+      totalIncidents: incidents.length,
+      totalDowntime: Math.round(downtimeMs / 1000 / 60), // minutes
+      slowRequests,
+      serverErrors,
+      sslStatus,
+      summary,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("Report error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to generate report" });
+  }
+});
+
+// ==================== SITE REPORT PDF DOWNLOAD ====================
+
+app.get("/api/report/:site/download", authenticateToken, async (req, res) => {
+  try {
+    const site = decodeURIComponent(req.params.site);
+    const range = req.query.range || "24h";
+
+    // Calculate timeframe
+    const now = new Date();
+    let startTime;
+    let rangeLabel = "24h";
+    switch (range) {
+      case "7d":
+        startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        rangeLabel = "7d";
+        break;
+      case "30d":
+        startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        rangeLabel = "30d";
+        break;
+      default:
+        startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        rangeLabel = "24h";
+    }
+
+    // Fetch logs
+    const logs = await Log.find({
+      userId: req.userId,
+      website: site,
+      timestamp: { $gte: startTime, $lte: now }
+    }).sort({ timestamp: 1 }).lean();
+
+    // Calculate metrics (same as /api/report/:site)
+    const totalTime = now.getTime() - startTime.getTime();
+    let downtimeMs = 0;
+    let isCurrentlyDown = false;
+    let downStartTime = null;
+
+    logs.forEach((log) => {
+      if (log.messagetype === "down") {
+        isCurrentlyDown = true;
+        downStartTime = log.timestamp;
+      } else if (log.messagetype === "ok" && isCurrentlyDown) {
+        if (downStartTime) {
+          downtimeMs += log.timestamp.getTime() - downStartTime.getTime();
+        }
+        isCurrentlyDown = false;
+      }
+    });
+
+    if (isCurrentlyDown && downStartTime) {
+      downtimeMs += now.getTime() - downStartTime.getTime();
+    }
+
+    const uptime = ((totalTime - downtimeMs) / totalTime) * 100;
+    const responseTimes = logs
+      .filter(l => l.response_time_ms && l.messagetype === "ok")
+      .map(l => l.response_time_ms);
+    const avgResponseTime = responseTimes.length > 0
+      ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
+      : 0;
+    const minResponseTime = responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
+    const maxResponseTime = responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
+    const incidents = logs.filter(l => l.messagetype === "down");
+    const slowRequests = logs.filter(l => l.response_time_ms > 2000).length;
+    const serverErrors = logs.filter(l => l.status_code >= 500).length;
+
+    const timeframeLabel = rangeLabel === "7d" ? "last 7 days" : rangeLabel === "30d" ? "last 30 days" : "last 24 hours";
+    const summary = `${site} was up ${uptime.toFixed(1)}% over the ${timeframeLabel}, with ${incidents.length} outage${incidents.length !== 1 ? "s" : ""} totaling ${Math.round(downtimeMs / 1000 / 60)} minutes.`;
+
+    // Import PDF kit
+    const PDFDocument = require('pdfkit');
+
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${site}-report-${rangeLabel}.pdf"`);
+
+    // Create PDF document
+    const doc = new PDFDocument({ margin: 50 });
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(24).font('Helvetica-Bold').text('Site Report', { align: 'center' });
+    doc.fontSize(14).font('Helvetica').text(site, { align: 'center' });
+    doc.moveDown(0.5);
+
+    // Metadata
+    doc.fontSize(10).fillColor('#666');
+    doc.text(`Timeframe: ${timeframeLabel.toUpperCase()} | Generated: ${now.toLocaleString()}`);
+    doc.moveDown(1);
+
+    // Summary
+    doc.fontSize(12).fillColor('#000').font('Helvetica-Bold').text('Summary');
+    doc.fontSize(11).font('Helvetica').text(summary);
+    doc.moveDown(1);
+
+    // Stats table
+    doc.fontSize(12).font('Helvetica-Bold').text('Performance Metrics');
+    doc.moveDown(0.3);
+
+    const stats = [
+      ['Metric', 'Value'],
+      ['Uptime', `${uptime.toFixed(2)}%`],
+      ['Avg Response Time', `${avgResponseTime}ms`],
+      ['Min Response Time', `${minResponseTime}ms`],
+      ['Max Response Time', `${maxResponseTime}ms`],
+      ['Total Incidents', `${incidents.length}`],
+      ['Total Downtime', `${Math.round(downtimeMs / 1000 / 60)} min`],
+      ['Slow Requests (>2s)', `${slowRequests}`],
+      ['Server Errors (5xx)', `${serverErrors}`]
+    ];
+
+    // Simple table rendering
+    const colWidth = 250;
+    const rowHeight = 20;
+    let y = doc.y;
+
+    stats.forEach((row, idx) => {
+      const isHeader = idx === 0;
+      const bgColor = isHeader ? '#e0e0e0' : (idx % 2 === 0 ? '#f9f9f9' : '#fff');
+
+      // Draw background
+      doc.rect(50, y, colWidth, rowHeight).fill(bgColor);
+      doc.fillColor('#000');
+
+      // Draw text
+      const font = isHeader ? 'Helvetica-Bold' : 'Helvetica';
+      doc.font(font).fontSize(10);
+      doc.text(row[0], 60, y + 5, { width: 150 });
+      doc.text(row[1], 210, y + 5, { width: 80, align: 'right' });
+
+      y += rowHeight;
+    });
+
+    doc.moveDown(2);
+
+    // Footer
+    doc.fontSize(9).fillColor('#999').text('SiteLens Monitoring Report', { align: 'center' });
+
+    doc.end();
+
+  } catch (err) {
+    console.error("Report PDF error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to generate PDF report" });
+  }
+});
+
 // Start Express
 try {
   app.listen(PORT, () => {

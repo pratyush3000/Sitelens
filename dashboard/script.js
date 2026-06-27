@@ -283,6 +283,18 @@ async function showDrawer(site){
         <div class="drawer-stat"><div class="drawer-stat-label">Server Errors</div><div class="drawer-stat-value">${s.serverErrors || 0}</div></div>
       </div>
 
+      <!-- Report Section -->
+      <div class="report-section" style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+        <h3>📊 Timeframe Report</h3>
+        <div class="report-timeframe-selector" style="display: flex; gap: 8px; margin: 12px 0;">
+          <button class="btn-report-time active" data-range="24h" onclick="loadSiteReport(currentDrawerSite, '24h')">24h</button>
+          <button class="btn-report-time" data-range="7d" onclick="loadSiteReport(currentDrawerSite, '7d')">7d</button>
+          <button class="btn-report-time" data-range="30d" onclick="loadSiteReport(currentDrawerSite, '30d')">30d</button>
+          <button class="btn-primary" style="margin-left: auto;" onclick="downloadSiteReport(currentDrawerSite, getCurrentReportRange())">⬇️ Download PDF</button>
+        </div>
+        <div id="reportSummary"></div>
+      </div>
+
 <div class="chart-section">
         <h3>Response Time Trend</h3>
         <div class="chart-wrapper">
@@ -351,11 +363,92 @@ async function showDrawer(site){
 // load incidents after chart
     loadIncidents(site);
 
+    // Load initial report (24h)
+    loadSiteReport(site, "24h");
+
   } catch(e) {
     content.innerHTML = `<div class="padded">Error loading details</div>`;
     console.error(e);
   }
 }
+
+// Track current site for report functions
+let currentDrawerSite = null;
+let currentReportRange = "24h";
+
+window.loadSiteReport = async function(site, range) {
+  currentDrawerSite = site;
+  currentReportRange = range;
+
+  // Update button states
+  document.querySelectorAll('.btn-report-time').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === range);
+  });
+
+  const summaryDiv = document.getElementById('reportSummary');
+  if (!summaryDiv) return;
+
+  summaryDiv.innerHTML = `<div class="padded small">Loading report...</div>`;
+
+  try {
+    const encoded = encodeURIComponent(site);
+    const res = await fetch(`/api/report/${encoded}?range=${range}`, {
+      headers: authHeaders()
+    });
+    const data = await res.json();
+
+    if (!data.success) {
+      summaryDiv.innerHTML = `<div class="padded small">Failed to load report</div>`;
+      return;
+    }
+
+    // Render report summary
+    summaryDiv.innerHTML = `
+      <div style="background: #f9f9f9; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+        <p style="margin: 0; font-size: 0.95em; line-height: 1.5;">${data.summary}</p>
+      </div>
+      <div class="drawer-stats-grid">
+        <div class="drawer-stat">
+          <div class="drawer-stat-label">Uptime</div>
+          <div class="drawer-stat-value">${data.uptime.toFixed(2)}%</div>
+        </div>
+        <div class="drawer-stat">
+          <div class="drawer-stat-label">Avg Response</div>
+          <div class="drawer-stat-value">${data.avgResponseTime}ms</div>
+        </div>
+        <div class="drawer-stat">
+          <div class="drawer-stat-label">Min / Max</div>
+          <div class="drawer-stat-value">${data.minResponseTime} / ${data.maxResponseTime}ms</div>
+        </div>
+        <div class="drawer-stat">
+          <div class="drawer-stat-label">Incidents</div>
+          <div class="drawer-stat-value">${data.totalIncidents}</div>
+        </div>
+        <div class="drawer-stat">
+          <div class="drawer-stat-label">Downtime</div>
+          <div class="drawer-stat-value">${data.totalDowntime}min</div>
+        </div>
+        <div class="drawer-stat">
+          <div class="drawer-stat-label">Slow Requests</div>
+          <div class="drawer-stat-value">${data.slowRequests}</div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    console.error('Report load error:', err);
+    summaryDiv.innerHTML = `<div class="padded small">Error loading report</div>`;
+  }
+};
+
+window.downloadSiteReport = function(site, range) {
+  const encoded = encodeURIComponent(site);
+  const url = `/api/report/${encoded}/download?range=${range}`;
+  window.location.href = url;
+};
+
+window.getCurrentReportRange = function() {
+  return currentReportRange || "24h";
+};
 
 // ================= INCIDENT TIMELINE =================
 async function loadIncidents(site) {

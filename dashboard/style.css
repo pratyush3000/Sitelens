@@ -701,6 +701,48 @@ body::before {
   padding: 16px;
 }
 
+/* ── REPORT SECTION ── */
+.report-section {
+  background: var(--bg-secondary);
+  padding: 16px;
+  border-radius: var(--radius-sm);
+}
+
+.report-section h3 {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+}
+
+.btn-report-time {
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn-report-time:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn-report-time.active {
+  background: var(--indigo);
+  border-color: var(--indigo);
+  color: white;
+}
+
+#reportSummary {
+  margin-top: 12px;
+}
+
 /* ── INCIDENT TIMELINE ── */
 .incident-section { margin-bottom: 24px; }
 
