@@ -18,6 +18,7 @@ import { checkBrandVisibility } from "./utils/aiVisibility.js";
 import monitorModule, { addNewWebsite, removeWebsite } from "./monitor.js"; // importing monitor starts monitoring in that module
 import AIVisibilityLog from "./models/AIVisibilityLog.js";
 import AIVisibilityMonitor from "./models/AIVisibilityMonitor.js";
+import PDFDocument from "pdfkit";
 // Connect DB and validate
 await connectDB();
 validateEnvironment();
@@ -1003,9 +1004,6 @@ app.get("/api/report/:site/download", authenticateToken, async (req, res) => {
 
     const timeframeLabel = rangeLabel === "7d" ? "last 7 days" : rangeLabel === "30d" ? "last 30 days" : "last 24 hours";
     const summary = `${site} was up ${uptime.toFixed(1)}% over the ${timeframeLabel}, with ${incidents.length} outage${incidents.length !== 1 ? "s" : ""} totaling ${Math.round(downtimeMs / 1000 / 60)} minutes.`;
-
-    // Import PDF kit
-    const PDFDocument = require('pdfkit');
 
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
