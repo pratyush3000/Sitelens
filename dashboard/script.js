@@ -799,6 +799,10 @@ async function loadAIHistory() {
 
 // ================= AI VISIBILITY MONITORS =================
 
+function frequencyLabel(f) {
+  return { "6h": "Every 6h", "12h": "Every 12h", "daily": "Daily", "weekly": "Weekly", "monthly": "Monthly" }[f] ?? "Daily";
+}
+
 async function loadMonitors() {
   const listDiv = document.getElementById("monitorsList");
   if (!listDiv) return;
@@ -820,7 +824,9 @@ async function loadMonitors() {
           <tr>
             <th>Brand</th>
             <th>Keyword</th>
+            <th>Schedule</th>
             <th>Last Checked</th>
+            <th>Next Check</th>
             <th>Action</th>
           </tr>
         </thead>
@@ -829,12 +835,14 @@ async function loadMonitors() {
             <tr>
               <td>
                 ${m.brandName}
-                ${m.aliases && m.aliases.length > 0 
-                  ? `<div class="ai-aliases">also: ${m.aliases.join(", ")}</div>` 
+                ${m.aliases && m.aliases.length > 0
+                  ? `<div class="ai-aliases">also: ${m.aliases.join(", ")}</div>`
                   : ""}
               </td>
               <td>${m.keyword}</td>
-              <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting for first check..."}</td>
+              <td>${frequencyLabel(m.checkFrequency)}</td>
+              <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>
+              <td>${m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—"}</td>
               <td class="monitor-actions">
   <button class="btn-details" onclick="showTrend('${m.brandName}', '${m.keyword}')">📈 Trend</button>
   <button class="btn-remove" onclick="deleteMonitor('${m._id}')">Remove</button>
@@ -868,6 +876,7 @@ async function saveMonitor() {
   const brandName = document.getElementById("monitorBrandInput").value.trim();
   const keyword = document.getElementById("monitorKeywordInput").value.trim();
   const aliasRaw = document.getElementById("monitorAliasInput").value.trim();
+  const checkFrequency = document.getElementById("monitorFrequency").value;
   const aliases = aliasRaw ? aliasRaw.split(",").map(a => a.trim()).filter(a => a !== "") : [];
 
   if (!brandName || !keyword) {
@@ -882,13 +891,14 @@ async function saveMonitor() {
         "Content-Type": "application/json",
         ...authHeaders()
       },
-      body: JSON.stringify({ brandName, keyword, aliases })
+      body: JSON.stringify({ brandName, keyword, aliases, checkFrequency })
     });
     const data = await res.json();
     if (data.success) {
       document.getElementById("monitorBrandInput").value = "";
       document.getElementById("monitorKeywordInput").value = "";
       document.getElementById("monitorAliasInput").value = "";
+      document.getElementById("monitorFrequency").value = "daily";
       loadMonitors();
     } else {
       alert(data.message || "Failed to save monitor");

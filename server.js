@@ -14,6 +14,8 @@ import { logError, performHealthCheck, ERROR_LEVELS } from "./utils/errorHandler
 import { DataCleanup, startCleanupScheduler } from "./utils/dataCleanup.js";
 import { authenticateToken, generateToken } from "./utils/auth.js";
 import { checkBrandVisibility } from "./utils/aiVisibility.js";
+import cleanupOrphanedData from "./utils/orphanCleanup.js";
+import { sendAlertEmail } from "./utils/emailAlerts.js";
 
 import monitorModule, { addNewWebsite, removeWebsite } from "./monitor.js"; // importing monitor starts monitoring in that module
 import AIVisibilityLog from "./models/AIVisibilityLog.js";
@@ -137,6 +139,23 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
   } catch (err) {
     logError(err, { operation: "getUser" }, ERROR_LEVELS.MEDIUM);
     res.status(500).json({ success: false, message: "Failed to get user" });
+  }
+});
+
+// Delete user (cascade deletes all sites, logs, and monitors)
+app.delete("/api/auth/user", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    await user.deleteOne();
+
+    res.json({ success: true, message: "User and all associated data deleted successfully" });
+  } catch (err) {
+    logError(err, { operation: "deleteUser" }, ERROR_LEVELS.MEDIUM);
+    res.status(500).json({ success: false, message: "Failed to delete user" });
   }
 });
 
@@ -336,6 +355,34 @@ app.post("/cleanup", async (req, res) => {
   } catch (error) {
     logError(error, { operation: "manualCleanup" }, ERROR_LEVELS.MEDIUM);
     res.status(500).json({ error: "Cleanup failed" });
+  }
+});
+
+// Cleanup orphaned records (for users deleted directly in MongoDB)
+app.post("/cleanup-orphans", async (req, res) => {
+  try {
+    await cleanupOrphanedData();
+    res.json({ message: "Orphan cleanup completed successfully" });
+  } catch (error) {
+    logError(error, { operation: "orphanCleanup" }, ERROR_LEVELS.MEDIUM);
+    res.status(500).json({ error: "Orphan cleanup failed" });
+  }
+});
+
+// Trigger AI visibility checks manually (used by external cron services)
+app.post("/trigger-ai-checks", async (req, res) => {
+  try {
+    // Optional: Verify API key if set in environment
+    const cronKey = process.env.CRON_API_KEY;
+    if (cronKey && req.headers["x-cron-key"] !== cronKey) {
+      return res.status(401).json({ success: false, error: "Unauthorized" });
+    }
+
+    await runAIVisibilityChecks();
+    res.json({ success: true, message: "AI visibility checks triggered successfully" });
+  } catch (error) {
+    logError(error, { operation: "triggerAIChecks" }, ERROR_LEVELS.MEDIUM);
+    res.status(500).json({ success: false, error: "Failed to trigger AI checks" });
   }
 });
 
@@ -550,7 +597,7 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
 // Save a brand+keyword pair to auto-monitor
 app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
   try {
-    const { brandName, keyword, aliases = [] } = req.body;
+    const { brandName, keyword, aliases = [], checkFrequency = "daily" } = req.body;
     if (!brandName || !keyword) {
       return res.status(400).json({ success: false, message: "brandName and keyword are required" });
     }
@@ -566,14 +613,16 @@ app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Already monitoring this brand+keyword pair" });
     }
 
-const monitor = await AIVisibilityMonitor.create({
+    const monitor = await AIVisibilityMonitor.create({
       userId: req.userId,
       brandName,
       keyword,
-      aliases
+      aliases,
+      checkFrequency,
+      nextCheckAt: getNextCheckAt(checkFrequency),
     });
 
-    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" for user ${req.userId}`);
+    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" (${checkFrequency}) for user ${req.userId}`);
     res.json({ success: true, message: "Monitor saved", monitor });
   } catch (err) {
     console.error("Save monitor error:", err.message);
@@ -614,12 +663,67 @@ app.delete("/api/ai-visibility/monitor/:id", authenticateToken, async (req, res)
 });
 
 // ==================== AI VISIBILITY SCHEDULER ====================
+
+function getNextCheckAt(frequency) {
+  const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
+  return new Date(Date.now() + (ms[frequency] ?? 24) * 60 * 60 * 1000);
+}
+
+function buildAlertHtml({ username, brandName, keyword, model, changeDescription, checkedAt }) {
+  return `
+<!DOCTYPE html>
+<html>
+<body style="font-family:sans-serif;background:#f3f4f6;margin:0;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.12);overflow:hidden;">
+    <div style="background:#1e293b;padding:20px 24px;">
+      <h1 style="color:#fff;margin:0;font-size:18px;">SiteLens AI Visibility Alert</h1>
+    </div>
+    <div style="padding:24px;">
+      <p style="margin:0 0 16px;color:#374151;">Hi <b>${username}</b>,</p>
+      <p style="margin:0 0 16px;color:#374151;">
+        Your monitored brand <b>${brandName}</b> (keyword: <i>${keyword}</i>)
+        has experienced a visibility change on <b>${model}</b>:
+      </p>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:16px;margin:0 0 16px;">
+        <p style="margin:0;color:#374151;">${changeDescription}</p>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;color:#374151;">
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Brand</td>
+          <td style="padding:6px 0;font-weight:600;">${brandName}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Keyword</td>
+          <td style="padding:6px 0;">${keyword}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Model</td>
+          <td style="padding:6px 0;">${model}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Detected at</td>
+          <td style="padding:6px 0;">${checkedAt}</td>
+        </tr>
+      </table>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;">
+      <p style="margin:0;font-size:12px;color:#9ca3af;">
+        You are receiving this because you have AI visibility alerts enabled for this monitor.
+        Log in to SiteLens to view your full trend history.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
 async function runAIVisibilityChecks() {
   console.log("🤖 Running scheduled AI visibility checks...");
 
   try {
-    const monitors = await AIVisibilityMonitor.find({ isActive: true });
-    console.log(`📋 Found ${monitors.length} active AI visibility monitors`);
+    const now = new Date();
+    const monitors = await AIVisibilityMonitor.find({ isActive: true, nextCheckAt: { $lte: now } });
+    console.log(`📋 Found ${monitors.length} monitors due for checking`);
 
     for (const monitor of monitors) {
       try {
@@ -668,6 +772,55 @@ async function runAIVisibilityChecks() {
               continue;
             }
 
+            // ── ALERT: Compare with previous result and send email if status dropped ──
+            try {
+              if (monitor.alertsEnabled) {
+                const prevLog = await AIVisibilityLog.findOne({
+                  userId,
+                  brandName,
+                  keyword,
+                  model: modelKey,
+                }).sort({ checkedAt: -1 }).lean();
+
+                if (prevLog) {
+                  const statusDropped = prevLog.status === "VISIBLE" && result.status === "HIDDEN";
+                  const rankWorsened =
+                    prevLog.status === "VISIBLE" &&
+                    result.status === "VISIBLE" &&
+                    typeof prevLog.rank === "number" &&
+                    typeof result.rank === "number" &&
+                    result.rank > prevLog.rank;
+
+                  if (statusDropped || rankWorsened) {
+                    const user = await User.findById(userId).select("email username").lean();
+                    if (user && user.email) {
+                      const subject = statusDropped
+                        ? `[SiteLens] "${brandName}" dropped from AI results (${modelKey})`
+                        : `[SiteLens] "${brandName}" rank worsened on ${modelKey}: #${prevLog.rank} → #${result.rank}`;
+
+                      const changeDescription = statusDropped
+                        ? `<b>${brandName}</b> was previously <span style="color:#16a34a"><b>VISIBLE</b></span> at rank <b>#${prevLog.rank}</b> but is now <span style="color:#dc2626"><b>HIDDEN</b></span>.`
+                        : `<b>${brandName}</b> rank worsened from <span style="color:#16a34a"><b>#${prevLog.rank}</b></span> to <span style="color:#dc2626"><b>#${result.rank}</b></span>.`;
+
+                      const html = buildAlertHtml({
+                        username: user.username,
+                        brandName,
+                        keyword,
+                        model: modelKey,
+                        changeDescription,
+                        checkedAt: checkedAt.toLocaleString(),
+                      });
+
+                      await sendAlertEmail(user.email, subject, html);
+                    }
+                  }
+                }
+              }
+            } catch (alertErr) {
+              console.error(`❌ [SCHEDULER] Alert check failed for ${modelKey}: ${alertErr.message}`);
+            }
+            // ── END ALERT BLOCK ──
+
             console.log(`💾 [SCHEDULER] Storing ${result.model} result to database`);
 
             await AIVisibilityLog.create({
@@ -689,8 +842,11 @@ async function runAIVisibilityChecks() {
           }
         }
 
-        // update lastCheckedAt
-        await AIVisibilityMonitor.findByIdAndUpdate(_id, { lastCheckedAt: new Date() });
+        // update lastCheckedAt and nextCheckAt based on frequency
+        await AIVisibilityMonitor.findByIdAndUpdate(_id, {
+          lastCheckedAt: new Date(),
+          nextCheckAt: getNextCheckAt(monitor.checkFrequency),
+        });
 
         const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
         const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
@@ -713,9 +869,9 @@ async function runAIVisibilityChecks() {
   }
 }
 
-// Run once on startup, then every 24 hours
+// Run once on startup, then every 1 hour
 runAIVisibilityChecks();
-setInterval(runAIVisibilityChecks, 24 * 60 * 60 * 1000);
+setInterval(runAIVisibilityChecks, 60 * 60 * 1000);
 
 // ==================== AI VISIBILITY TREND ====================
 app.get("/api/ai-visibility/trend", authenticateToken, async (req, res) => {
@@ -1092,6 +1248,9 @@ try {
 
     // Start automatic data cleanup
     startCleanupScheduler(dataCleanup);
+
+    // Clean up any orphaned data from users deleted outside of Mongoose
+    cleanupOrphanedData();
   });
 } catch (error) {
   logError(error, { operation: "serverStartup", port: PORT }, ERROR_LEVELS.CRITICAL);

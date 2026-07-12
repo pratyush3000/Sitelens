@@ -7,6 +7,9 @@ const aiVisibilityMonitorSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   aliases: { type: [String], default: [] }, // e.g. ["Prime Video", "Amazon Prime Video"]
   lastCheckedAt: { type: Date, default: null },
+  alertsEnabled: { type: Boolean, default: true },
+  checkFrequency: { type: String, enum: ["6h", "12h", "daily", "weekly", "monthly"], default: "daily" },
+  nextCheckAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -153,12 +153,19 @@
 
                 <!-- Auto-Monitor -->
                 <div class="ai-monitors-section">
-                    <h3>⏰ Auto-Monitor <span class="badge-subtle">Daily</span></h3>
-                    <p class="ai-subtitle">Save brand+keyword pairs — checked automatically every 24 hours</p>
+                    <h3>⏰ Auto-Monitor</h3>
+                    <p class="ai-subtitle">Save brand+keyword pairs with your preferred check frequency</p>
                     <div class="ai-input-row">
                         <input id="monitorBrandInput" type="text" placeholder="Brand name" />
                         <input id="monitorAliasInput" type="text" placeholder="Aliases, comma separated (optional)" />
                         <input id="monitorKeywordInput" type="text" placeholder="Keyword" />
+                        <select id="monitorFrequency">
+                            <option value="6h">Every 6 hours</option>
+                            <option value="12h">Every 12 hours</option>
+                            <option value="daily" selected>Daily (default)</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
                         <button id="saveMonitorBtn" class="btn-primary">Save Monitor</button>
                     </div>
                     <div id="monitorsList"></div>
