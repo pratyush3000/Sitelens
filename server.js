@@ -55,6 +55,10 @@ app.get("/", (req, res) => {
 // Sign up
 app.post("/api/auth/signup", async (req, res) => {
   try {
+    if (process.env.SIGNUPS_ENABLED !== "true") {
+      return res.status(403).json({ success: false, message: "Signups are currently closed." });
+    }
+
     const { username, email, password } = req.body;
 
     if (!username || !email || !password) {

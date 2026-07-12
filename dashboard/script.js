@@ -103,7 +103,12 @@ async function handleSignup() {
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      $("signupError").textContent = data.message || "Sign up failed.";
+      const errorMsg = data.message || "Sign up failed.";
+      $("signupError").textContent = errorMsg;
+      if (errorMsg.includes("currently closed")) {
+        $("signupError").style.fontWeight = "600";
+        $("signupError").style.color = "#dc2626";
+      }
       return;
     }
     localStorage.setItem("authToken", data.token);
