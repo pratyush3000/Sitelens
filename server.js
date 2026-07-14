@@ -874,24 +874,23 @@ function getNextCheckAt(frequency, preferredTime = "09:00", timezone = "UTC") {
   }
 }
 
-function shouldRunMonitor(monitor, currentHour, currentDay) {
-  const [prefHour] = monitor.preferredTime.split(":").map(Number);
+function shouldRunMonitor(monitor, currentHour, currentMinute, currentDay) {
+  const [prefHour, prefMin] = monitor.preferredTime.split(":").map(Number);
 
   // Skip if user cancelled this check
   if (monitor.skipNextCheck) return false;
 
-  // Check if current hour matches preferred hour
-  if (currentHour !== prefHour) return false;
+  // Check if current hour and minute match preferred time (within 1 minute tolerance)
+  if (currentHour !== prefHour || Math.abs(currentMinute - prefMin) > 1) return false;
 
-  // Avoid running twice in same hour
-  if (monitor.lastRunHour === currentHour) return false;
+  // Avoid running twice in same minute
+  if (monitor.lastRunHour === currentHour && monitor.lastRunMin === currentMinute) return false;
 
   // For weekly, check if today is the preferred day
   if (monitor.checkFrequency === "weekly") {
     if (currentDay !== monitor.preferredDay) return false;
   }
 
-  // For now, always allow it to run if hour matches (ignore nextCheckAt for debugging)
   return true;
 }
 
@@ -963,9 +962,10 @@ async function runAIVisibilityChecks() {
 
       const parts = formatter.formatToParts(now);
       const currentHour = parseInt(parts.find(p => p.type === 'hour').value);
+      const currentMinute = parseInt(parts.find(p => p.type === 'minute').value);
       const currentDay = days[now.getDay()];
 
-      return shouldRunMonitor(m, currentHour, currentDay);
+      return shouldRunMonitor(m, currentHour, currentMinute, currentDay);
     });
 
     console.log(`📋 Found ${eligibleMonitors.length} monitors due for checking (out of ${monitors.length} active)`);
