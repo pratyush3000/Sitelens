@@ -13,6 +13,7 @@ const aiVisibilityMonitorSchema = new mongoose.Schema({
   preferredDay: { type: String, enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], default: "Monday" }, // for weekly
   lastRunHour: { type: Number, default: -1 }, // track which hour the check last ran to avoid duplicates
   nextCheckAt: { type: Date, default: Date.now },
+  skipNextCheck: { type: Boolean, default: false }, // user can cancel next scheduled check
   createdAt: { type: Date, default: Date.now }
 });
 

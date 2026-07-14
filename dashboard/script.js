@@ -836,6 +836,7 @@ async function loadMonitors() {
             const scheduleLabel = frequencyLabel(m.checkFrequency);
             const timeLabel = m.preferredTime ? m.preferredTime : "09:00";
             const dayLabel = m.checkFrequency === "weekly" && m.preferredDay ? ` (${m.preferredDay})` : "";
+            const statusLabel = m.skipNextCheck ? '<span style="color:#dc2626;font-weight:600;">⏸️ SKIPPED</span>' : '<span style="color:#16a34a;">✓ Active</span>';
             return `
             <tr>
               <td>
@@ -845,12 +846,17 @@ async function loadMonitors() {
                   : ""}
               </td>
               <td>${m.keyword}</td>
+              <td>${statusLabel}</td>
               <td>${scheduleLabel}</td>
               <td>${timeLabel}${dayLabel}</td>
               <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>
               <td>${m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—"}</td>
               <td class="monitor-actions">
   <button class="btn-details" onclick="showTrend('${m.brandName}', '${m.keyword}')">📈 Trend</button>
+  ${m.skipNextCheck
+    ? `<button class="btn-primary" onclick="resumeCheck('${m._id}')">▶️ Resume</button>`
+    : `<button class="btn-outline" onclick="cancelNextCheck('${m._id}')">⏸️ Skip Next</button>`
+  }
   <button class="btn-remove" onclick="deleteMonitor('${m._id}')">Remove</button>
 </td>
             </tr>
@@ -876,6 +882,43 @@ window.deleteMonitor = async function(id) {
     else alert(data.message || "Failed to remove monitor");
   } catch (err) {
     console.error("Delete monitor error:", err);
+  }
+};
+
+window.cancelNextCheck = async function(id) {
+  if (!confirm("Skip the next scheduled check for this monitor?")) return;
+  try {
+    const res = await fetch(`/api/ai-visibility/monitor/${id}/cancel-next-check`, {
+      method: "POST",
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert("Next check cancelled ✓");
+      loadMonitors();
+    } else {
+      alert(data.message || "Failed to cancel check");
+    }
+  } catch (err) {
+    console.error("Cancel check error:", err);
+  }
+};
+
+window.resumeCheck = async function(id) {
+  try {
+    const res = await fetch(`/api/ai-visibility/monitor/${id}/resume-check`, {
+      method: "POST",
+      headers: authHeaders()
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert("Monitor resumed ✓");
+      loadMonitors();
+    } else {
+      alert(data.message || "Failed to resume monitor");
+    }
+  } catch (err) {
+    console.error("Resume check error:", err);
   }
 };
 

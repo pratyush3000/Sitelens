@@ -664,6 +664,46 @@ app.delete("/api/ai-visibility/monitor/:id", authenticateToken, async (req, res)
   }
 });
 
+// Cancel next scheduled check for a monitor
+app.post("/api/ai-visibility/monitor/:id/cancel-next-check", authenticateToken, async (req, res) => {
+  try {
+    const monitor = await AIVisibilityMonitor.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
+      { skipNextCheck: true },
+      { new: true }
+    );
+
+    if (!monitor) {
+      return res.status(404).json({ success: false, message: "Monitor not found" });
+    }
+
+    res.json({ success: true, message: "Next check cancelled", monitor });
+  } catch (err) {
+    console.error("Cancel check error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to cancel next check" });
+  }
+});
+
+// Resume monitor (clear skip flag)
+app.post("/api/ai-visibility/monitor/:id/resume-check", authenticateToken, async (req, res) => {
+  try {
+    const monitor = await AIVisibilityMonitor.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
+      { skipNextCheck: false },
+      { new: true }
+    );
+
+    if (!monitor) {
+      return res.status(404).json({ success: false, message: "Monitor not found" });
+    }
+
+    res.json({ success: true, message: "Monitor resumed", monitor });
+  } catch (err) {
+    console.error("Resume check error:", err.message);
+    res.status(500).json({ success: false, message: "Failed to resume monitor" });
+  }
+});
+
 // ==================== AI VISIBILITY SCHEDULER ====================
 
 function getNextCheckAt(frequency, preferredTime = "09:00") {
@@ -686,6 +726,9 @@ function getNextCheckAt(frequency, preferredTime = "09:00") {
 
 function shouldRunMonitor(monitor, currentHour, currentDay) {
   const [prefHour] = monitor.preferredTime.split(":").map(Number);
+
+  // Skip if user cancelled this check
+  if (monitor.skipNextCheck) return false;
 
   // Check if current hour matches preferred hour
   if (currentHour !== prefHour) return false;
