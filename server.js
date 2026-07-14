@@ -16,6 +16,7 @@ import { authenticateToken, generateToken } from "./utils/auth.js";
 import { checkBrandVisibility } from "./utils/aiVisibility.js";
 import cleanupOrphanedData from "./utils/orphanCleanup.js";
 import { sendAlertEmail } from "./utils/emailAlerts.js";
+import cron from "node-cron";
 
 import monitorModule, { addNewWebsite, removeWebsite } from "./monitor.js"; // importing monitor starts monitoring in that module
 import AIVisibilityLog from "./models/AIVisibilityLog.js";
@@ -1115,9 +1116,14 @@ async function runAIVisibilityChecks() {
   }
 }
 
-// Run once on startup, then every 1 hour
+// Run once on startup
 runAIVisibilityChecks();
-setInterval(runAIVisibilityChecks, 60 * 60 * 1000);
+
+// Schedule to run every minute using node-cron (more reliable than setInterval)
+cron.schedule('* * * * *', () => {
+  console.log('⏰ [CRON] Running scheduled AI visibility checks (every minute)');
+  runAIVisibilityChecks();
+});
 
 // ==================== AI VISIBILITY TREND ====================
 app.get("/api/ai-visibility/trend", authenticateToken, async (req, res) => {
