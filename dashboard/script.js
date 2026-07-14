@@ -824,6 +824,8 @@ async function loadMonitors() {
           <tr>
             <th>Brand</th>
             <th>Keyword</th>
+            <th>Status</th>
+            <th>Run Status</th>
             <th>Schedule</th>
             <th>Time</th>
             <th>Last Checked</th>
@@ -837,6 +839,11 @@ async function loadMonitors() {
             const timeLabel = m.preferredTime ? m.preferredTime : "09:00";
             const dayLabel = m.checkFrequency === "weekly" && m.preferredDay ? ` (${m.preferredDay})` : "";
             const statusLabel = m.skipNextCheck ? '<span style="color:#dc2626;font-weight:600;">⏸️ SKIPPED</span>' : '<span style="color:#16a34a;">✓ Active</span>';
+            const runStatus = m.lastRunStatus === "success"
+              ? '<span style="color:#16a34a;">✅ Success</span>'
+              : m.lastRunStatus === "failed"
+              ? '<span style="color:#dc2626;">❌ Failed</span>'
+              : '<span style="color:#9ca3af;">⏳ Pending</span>';
             return `
             <tr>
               <td>
@@ -847,12 +854,14 @@ async function loadMonitors() {
               </td>
               <td>${m.keyword}</td>
               <td>${statusLabel}</td>
+              <td>${runStatus}</td>
               <td>${scheduleLabel}</td>
               <td>${timeLabel}${dayLabel}</td>
               <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>
               <td>${m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—"}</td>
               <td class="monitor-actions">
   <button class="btn-details" onclick="showTrend('${m.brandName}', '${m.keyword}')">📈 Trend</button>
+  <button class="btn-primary" onclick="runCheckNow('${m._id}', '${m.brandName}')">▶️ Run Now</button>
   ${m.skipNextCheck
     ? `<button class="btn-primary" onclick="resumeCheck('${m._id}')">▶️ Resume</button>`
     : `<button class="btn-outline" onclick="cancelNextCheck('${m._id}')">⏸️ Skip Next</button>`
@@ -919,6 +928,49 @@ window.resumeCheck = async function(id) {
     }
   } catch (err) {
     console.error("Resume check error:", err);
+  }
+};
+
+window.runCheckNow = async function(id, brandName) {
+  const statusDiv = document.getElementById("monitorStatusMessage");
+
+  try {
+    statusDiv.style.display = "block";
+    statusDiv.style.background = "#fef2f2";
+    statusDiv.style.color = "#dc2626";
+    statusDiv.textContent = `⏳ Running check for ${brandName}...`;
+
+    const res = await fetch(`/api/ai-visibility/monitor/${id}/run-now`, {
+      method: "POST",
+      headers: authHeaders()
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      statusDiv.style.background = "#f0fdf4";
+      statusDiv.style.color = "#16a34a";
+      statusDiv.innerHTML = `
+        ✅ <b>Check completed for ${data.brandName}</b><br>
+        Models checked: ${data.checksRun}/2<br>
+        Status: ${data.status}<br>
+        Rank: ${data.rank ? '#' + data.rank : 'Not visible'}<br>
+        Checked at: ${new Date(data.checkedAt).toLocaleString()}
+      `;
+      loadMonitors();
+      setTimeout(() => {
+        statusDiv.style.display = "none";
+      }, 5000);
+    } else {
+      statusDiv.style.background = "#fef2f2";
+      statusDiv.style.color = "#dc2626";
+      statusDiv.textContent = `❌ Check failed: ${data.error || "Unknown error"}`;
+    }
+  } catch (err) {
+    console.error("Run check error:", err);
+    statusDiv.style.background = "#fef2f2";
+    statusDiv.style.color = "#dc2626";
+    statusDiv.textContent = `❌ Error running check: ${err.message}`;
   }
 };
 

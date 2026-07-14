@@ -14,6 +14,8 @@ const aiVisibilityMonitorSchema = new mongoose.Schema({
   lastRunHour: { type: Number, default: -1 }, // track which hour the check last ran to avoid duplicates
   nextCheckAt: { type: Date, default: Date.now },
   skipNextCheck: { type: Boolean, default: false }, // user can cancel next scheduled check
+  lastRunStatus: { type: String, default: "pending" }, // "pending", "success", "failed"
+  lastRunError: { type: String, default: null }, // error message if check failed
   createdAt: { type: Date, default: Date.now }
 });
 

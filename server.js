@@ -704,6 +704,106 @@ app.post("/api/ai-visibility/monitor/:id/resume-check", authenticateToken, async
   }
 });
 
+// Run a specific monitor check immediately (for testing/manual trigger)
+app.post("/api/ai-visibility/monitor/:id/run-now", authenticateToken, async (req, res) => {
+  try {
+    const monitor = await AIVisibilityMonitor.findOne({
+      _id: req.params.id,
+      userId: req.userId
+    });
+
+    if (!monitor) {
+      return res.status(404).json({ success: false, message: "Monitor not found" });
+    }
+
+    const { brandName, keyword, userId, _id, aliases = [], checkFrequency, preferredTime } = monitor;
+    const allNames = [brandName, ...aliases.map(a => a.trim()).filter(a => a !== "")];
+
+    const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a numbered list of exactly 5 top recommendations with a brief reason for each. Format strictly as:
+1. BrandName: reason
+2. BrandName: reason
+3. BrandName: reason
+4. BrandName: reason
+5. BrandName: reason`;
+
+    const results = {};
+    const models = ["gemini", "llama"];
+    let checksPassed = 0;
+
+    for (const model of models) {
+      try {
+        const result = await checkBrandVisibility(prompt, model, allNames);
+        results[model] = result;
+        if (result.status !== "ERROR") checksPassed++;
+      } catch (err) {
+        console.error(`❌ ${model} check failed:`, err.message);
+        results[model] = { status: "ERROR", error: err.message };
+      }
+    }
+
+    const checkedAt = new Date();
+
+    // Save logs for successful results
+    for (const modelKey of models) {
+      const result = results[modelKey];
+      if (result.status === "ERROR") continue;
+
+      try {
+        if (!modelKey || modelKey === "undefined" || !result.model || result.model === "undefined") {
+          continue;
+        }
+
+        await AIVisibilityLog.create({
+          userId,
+          brandName,
+          keyword,
+          status: result.status,
+          rank: result.rank,
+          totalRecommendations: result.totalRecommendations,
+          mentionSnippet: result.mentionSnippet,
+          matchedAs: result.matchedAs,
+          model: result.model,
+          modelSource: result.modelSource || "pinned",
+          rawResponse: result.rawResponse,
+          checkedAt
+        });
+      } catch (saveErr) {
+        console.error(`❌ Failed to save ${modelKey} log:`, saveErr.message);
+      }
+    }
+
+    // Update monitor with status
+    const updateData = {
+      lastCheckedAt: new Date(),
+      nextCheckAt: getNextCheckAt(checkFrequency, preferredTime),
+      lastRunHour: new Date().getHours(),
+      lastRunStatus: checksPassed > 0 ? "success" : "failed",
+      lastRunError: checksPassed > 0 ? null : "No models returned results"
+    };
+
+    await AIVisibilityMonitor.findByIdAndUpdate(_id, updateData);
+
+    const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
+    const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
+    const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
+
+    res.json({
+      success: true,
+      message: `Check completed: ${checksPassed}/${models.length} models succeeded`,
+      brandName,
+      keyword,
+      checksRun: checksPassed,
+      status: visibleResults.length > 0 ? `Visible in ${visibleResults.length} model(s)` : "Not visible",
+      rank: bestRank,
+      checkedAt: checkedAt.toISOString(),
+      results: successfulResults
+    });
+  } catch (err) {
+    console.error("Run now error:", err.message);
+    res.status(500).json({ success: false, error: "Failed to run check", details: err.message });
+  }
+});
+
 // ==================== AI VISIBILITY SCHEDULER ====================
 
 function getNextCheckAt(frequency, preferredTime = "09:00") {
