@@ -812,52 +812,59 @@ function getNextCheckAt(frequency, preferredTime = "09:00", timezone = "UTC") {
     const now = new Date();
     const [prefHour, prefMin] = preferredTime.split(":").map(Number);
 
-    // Get current time in user's timezone
-    const formatter = new Intl.DateTimeFormat('en-US', {
+    // Get the current date string in the user's timezone
+    const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit',
+      day: '2-digit'
+    });
+
+    const [year, month, day] = formatter.format(now).split('-').map(Number);
+
+    // Create a date string in ISO format and parse it (this gives us midnight in that timezone)
+    const tzMidnight = new Date(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00Z`);
+
+    // Get the offset in milliseconds between server UTC and user's timezone
+    const formatter2 = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
       hour12: false
     });
 
-    const parts = formatter.formatToParts(now);
-    const tzDate = {
-      year: parseInt(parts.find(p => p.type === 'year').value),
-      month: parseInt(parts.find(p => p.type === 'month').value),
-      day: parseInt(parts.find(p => p.type === 'day').value),
-      hour: parseInt(parts.find(p => p.type === 'hour').value),
-      minute: parseInt(parts.find(p => p.type === 'minute').value)
-    };
+    const parts = formatter2.formatToParts(now);
+    const tzHour = parseInt(parts.find(p => p.type === 'hour').value);
+    const tzMin = parseInt(parts.find(p => p.type === 'minute').value);
+    const tzSec = parseInt(parts.find(p => p.type === 'second').value);
+    const tzTimeMs = (tzHour * 60 * 60 + tzMin * 60 + tzSec) * 1000;
 
-    // Create date at preferred time in timezone
-    const baseDate = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
-    baseDate.setHours(prefHour, prefMin, 0, 0);
+    const utcMidnightMs = tzMidnight.getTime();
+    const tzMidnightMs = now.getTime() - tzTimeMs;
+    const tzOffset = tzMidnightMs - utcMidnightMs;
 
-    // Calculate offset between local and target timezone
-    const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
-    const offset = now.getTime() - localDate.getTime();
-    baseDate.setTime(baseDate.getTime() + offset);
+    // Create next check time at preferred hour in user's timezone
+    let nextCheck = new Date(now.getTime() + tzOffset);
+    nextCheck.setUTCHours(prefHour, prefMin, 0, 0);
 
     const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
     const intervalHours = ms[frequency] ?? 24;
 
-    // If preferred time has already passed in user's timezone, schedule for next interval
-    if (baseDate <= now) {
-      baseDate.setTime(baseDate.getTime() + intervalHours * 60 * 60 * 1000);
+    // If preferred time has already passed, schedule for next interval
+    if (nextCheck <= now) {
+      nextCheck.setTime(nextCheck.getTime() + intervalHours * 60 * 60 * 1000);
     }
 
-    return baseDate;
+    console.log(`🕐 Timezone calc: now=${now.toISOString()}, tz=${timezone}, prefTime=${preferredTime}, nextCheck=${nextCheck.toISOString()}`);
+    return nextCheck;
   } catch (err) {
     console.error(`⚠️ Timezone calculation failed for ${timezone}, using UTC:`, err.message);
     // Fallback to UTC if timezone is invalid
     const now = new Date();
     const [prefHour, prefMin] = preferredTime.split(":").map(Number);
     let nextCheck = new Date(now);
-    nextCheck.setHours(prefHour, prefMin, 0, 0);
+    nextCheck.setUTCHours(prefHour, prefMin, 0, 0);
     const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
     const intervalHours = ms[frequency] ?? 24;
     if (nextCheck <= now) {
