@@ -891,9 +891,7 @@ function shouldRunMonitor(monitor, currentHour, currentDay) {
     if (currentDay !== monitor.preferredDay) return false;
   }
 
-  // Check if nextCheckAt is due
-  if (new Date() < new Date(monitor.nextCheckAt)) return false;
-
+  // For now, always allow it to run if hour matches (ignore nextCheckAt for debugging)
   return true;
 }
 
@@ -950,12 +948,26 @@ async function runAIVisibilityChecks() {
 
   try {
     const now = new Date();
-    const currentHour = now.getHours();
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const currentDay = days[now.getDay()];
 
     const monitors = await AIVisibilityMonitor.find({ isActive: true });
-    const eligibleMonitors = monitors.filter(m => shouldRunMonitor(m, currentHour, currentDay));
+    const eligibleMonitors = monitors.filter(m => {
+      // Get current time in monitor's timezone
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: m.timezone || "UTC",
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+
+      const parts = formatter.formatToParts(now);
+      const currentHour = parseInt(parts.find(p => p.type === 'hour').value);
+      const currentDay = days[now.getDay()];
+
+      return shouldRunMonitor(m, currentHour, currentDay);
+    });
+
     console.log(`📋 Found ${eligibleMonitors.length} monitors due for checking (out of ${monitors.length} active)`);
 
     for (const monitor of eligibleMonitors) {
