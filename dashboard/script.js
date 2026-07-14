@@ -838,6 +838,7 @@ async function loadMonitors() {
             const scheduleLabel = frequencyLabel(m.checkFrequency);
             const timeLabel = m.preferredTime ? m.preferredTime : "09:00";
             const dayLabel = m.checkFrequency === "weekly" && m.preferredDay ? ` (${m.preferredDay})` : "";
+            const tzLabel = m.timezone ? ` [${m.timezone}]` : " [UTC]";
             const statusLabel = m.skipNextCheck ? '<span style="color:#dc2626;font-weight:600;">⏸️ SKIPPED</span>' : '<span style="color:#16a34a;">✓ Active</span>';
             const runStatus = m.lastRunStatus === "success"
               ? '<span style="color:#16a34a;">✅ Success</span>'
@@ -856,7 +857,7 @@ async function loadMonitors() {
               <td>${statusLabel}</td>
               <td>${runStatus}</td>
               <td>${scheduleLabel}</td>
-              <td>${timeLabel}${dayLabel}</td>
+              <td>${timeLabel}${dayLabel}${tzLabel}</td>
               <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>
               <td>${m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—"}</td>
               <td class="monitor-actions">
@@ -981,6 +982,7 @@ async function saveMonitor() {
   const checkFrequency = document.getElementById("monitorFrequency").value;
   const preferredTime = document.getElementById("monitorTime").value; // HH:mm
   const preferredDay = document.getElementById("monitorDay").value;
+  const timezone = document.getElementById("monitorTimezone").value;
   const aliases = aliasRaw ? aliasRaw.split(",").map(a => a.trim()).filter(a => a !== "") : [];
 
   if (!brandName || !keyword) {
@@ -995,7 +997,7 @@ async function saveMonitor() {
         "Content-Type": "application/json",
         ...authHeaders()
       },
-      body: JSON.stringify({ brandName, keyword, aliases, checkFrequency, preferredTime, preferredDay })
+      body: JSON.stringify({ brandName, keyword, aliases, checkFrequency, preferredTime, preferredDay, timezone })
     });
     const data = await res.json();
     if (data.success) {
@@ -1005,6 +1007,7 @@ async function saveMonitor() {
       document.getElementById("monitorFrequency").value = "daily";
       document.getElementById("monitorTime").value = "09:00";
       document.getElementById("monitorDay").value = "Monday";
+      document.getElementById("monitorTimezone").value = "UTC";
       loadMonitors();
     } else {
       alert(data.message || "Failed to save monitor");

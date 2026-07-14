@@ -16,6 +16,7 @@ const aiVisibilityMonitorSchema = new mongoose.Schema({
   skipNextCheck: { type: Boolean, default: false }, // user can cancel next scheduled check
   lastRunStatus: { type: String, default: "pending" }, // "pending", "success", "failed"
   lastRunError: { type: String, default: null }, // error message if check failed
+  timezone: { type: String, default: "UTC" }, // user's timezone for scheduling (e.g., "Asia/Kolkata", "America/New_York")
   createdAt: { type: Date, default: Date.now }
 });
 

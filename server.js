@@ -597,7 +597,7 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
 // Save a brand+keyword pair to auto-monitor
 app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
   try {
-    const { brandName, keyword, aliases = [], checkFrequency = "daily", preferredTime = "09:00", preferredDay = "Monday" } = req.body;
+    const { brandName, keyword, aliases = [], checkFrequency = "daily", preferredTime = "09:00", preferredDay = "Monday", timezone = "UTC" } = req.body;
     if (!brandName || !keyword) {
       return res.status(400).json({ success: false, message: "brandName and keyword are required" });
     }
@@ -621,10 +621,11 @@ app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
       checkFrequency,
       preferredTime,
       preferredDay,
-      nextCheckAt: getNextCheckAt(checkFrequency, preferredTime),
+      timezone,
+      nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, timezone),
     });
 
-    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" (${checkFrequency} at ${preferredTime}) for user ${req.userId}`);
+    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" (${checkFrequency} at ${preferredTime} ${timezone}) for user ${req.userId}`);
     res.json({ success: true, message: "Monitor saved", monitor });
   } catch (err) {
     console.error("Save monitor error:", err.message);
@@ -775,7 +776,7 @@ app.post("/api/ai-visibility/monitor/:id/run-now", authenticateToken, async (req
     // Update monitor with status
     const updateData = {
       lastCheckedAt: new Date(),
-      nextCheckAt: getNextCheckAt(checkFrequency, preferredTime),
+      nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, monitor.timezone),
       lastRunHour: new Date().getHours(),
       lastRunStatus: checksPassed > 0 ? "success" : "failed",
       lastRunError: checksPassed > 0 ? null : "No models returned results"
@@ -806,22 +807,64 @@ app.post("/api/ai-visibility/monitor/:id/run-now", authenticateToken, async (req
 
 // ==================== AI VISIBILITY SCHEDULER ====================
 
-function getNextCheckAt(frequency, preferredTime = "09:00") {
-  const now = new Date();
-  const [prefHour, prefMin] = preferredTime.split(":").map(Number);
+function getNextCheckAt(frequency, preferredTime = "09:00", timezone = "UTC") {
+  try {
+    const now = new Date();
+    const [prefHour, prefMin] = preferredTime.split(":").map(Number);
 
-  let nextCheck = new Date(now);
-  nextCheck.setHours(prefHour, prefMin, 0, 0);
+    // Get current time in user's timezone
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
 
-  const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
-  const intervalHours = ms[frequency] ?? 24;
+    const parts = formatter.formatToParts(now);
+    const tzDate = {
+      year: parseInt(parts.find(p => p.type === 'year').value),
+      month: parseInt(parts.find(p => p.type === 'month').value),
+      day: parseInt(parts.find(p => p.type === 'day').value),
+      hour: parseInt(parts.find(p => p.type === 'hour').value),
+      minute: parseInt(parts.find(p => p.type === 'minute').value)
+    };
 
-  // If preferred time has already passed today, schedule for next interval
-  if (nextCheck <= now) {
-    nextCheck.setTime(nextCheck.getTime() + intervalHours * 60 * 60 * 1000);
+    // Create date at preferred time in timezone
+    const baseDate = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+    baseDate.setHours(prefHour, prefMin, 0, 0);
+
+    // Calculate offset between local and target timezone
+    const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' }));
+    const offset = now.getTime() - localDate.getTime();
+    baseDate.setTime(baseDate.getTime() + offset);
+
+    const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
+    const intervalHours = ms[frequency] ?? 24;
+
+    // If preferred time has already passed in user's timezone, schedule for next interval
+    if (baseDate <= now) {
+      baseDate.setTime(baseDate.getTime() + intervalHours * 60 * 60 * 1000);
+    }
+
+    return baseDate;
+  } catch (err) {
+    console.error(`⚠️ Timezone calculation failed for ${timezone}, using UTC:`, err.message);
+    // Fallback to UTC if timezone is invalid
+    const now = new Date();
+    const [prefHour, prefMin] = preferredTime.split(":").map(Number);
+    let nextCheck = new Date(now);
+    nextCheck.setHours(prefHour, prefMin, 0, 0);
+    const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
+    const intervalHours = ms[frequency] ?? 24;
+    if (nextCheck <= now) {
+      nextCheck.setTime(nextCheck.getTime() + intervalHours * 60 * 60 * 1000);
+    }
+    return nextCheck;
   }
-
-  return nextCheck;
 }
 
 function shouldRunMonitor(monitor, currentHour, currentDay) {
@@ -1028,7 +1071,7 @@ async function runAIVisibilityChecks() {
         // update lastCheckedAt, nextCheckAt, and lastRunHour based on frequency and preferred time
         await AIVisibilityMonitor.findByIdAndUpdate(_id, {
           lastCheckedAt: new Date(),
-          nextCheckAt: getNextCheckAt(checkFrequency, preferredTime),
+          nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, monitor.timezone),
           lastRunHour: currentHour,
         });
 
