@@ -825,13 +825,18 @@ async function loadMonitors() {
             <th>Brand</th>
             <th>Keyword</th>
             <th>Schedule</th>
+            <th>Time</th>
             <th>Last Checked</th>
             <th>Next Check</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody>
-          ${data.monitors.map(m => `
+          ${data.monitors.map(m => {
+            const scheduleLabel = frequencyLabel(m.checkFrequency);
+            const timeLabel = m.preferredTime ? m.preferredTime : "09:00";
+            const dayLabel = m.checkFrequency === "weekly" && m.preferredDay ? ` (${m.preferredDay})` : "";
+            return `
             <tr>
               <td>
                 ${m.brandName}
@@ -840,7 +845,8 @@ async function loadMonitors() {
                   : ""}
               </td>
               <td>${m.keyword}</td>
-              <td>${frequencyLabel(m.checkFrequency)}</td>
+              <td>${scheduleLabel}</td>
+              <td>${timeLabel}${dayLabel}</td>
               <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>
               <td>${m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—"}</td>
               <td class="monitor-actions">
@@ -848,7 +854,8 @@ async function loadMonitors() {
   <button class="btn-remove" onclick="deleteMonitor('${m._id}')">Remove</button>
 </td>
             </tr>
-          `).join("")}
+          `;
+          }).join("")}
         </tbody>
       </table>
     `;
@@ -877,6 +884,8 @@ async function saveMonitor() {
   const keyword = document.getElementById("monitorKeywordInput").value.trim();
   const aliasRaw = document.getElementById("monitorAliasInput").value.trim();
   const checkFrequency = document.getElementById("monitorFrequency").value;
+  const preferredTime = document.getElementById("monitorTime").value; // HH:mm
+  const preferredDay = document.getElementById("monitorDay").value;
   const aliases = aliasRaw ? aliasRaw.split(",").map(a => a.trim()).filter(a => a !== "") : [];
 
   if (!brandName || !keyword) {
@@ -891,7 +900,7 @@ async function saveMonitor() {
         "Content-Type": "application/json",
         ...authHeaders()
       },
-      body: JSON.stringify({ brandName, keyword, aliases, checkFrequency })
+      body: JSON.stringify({ brandName, keyword, aliases, checkFrequency, preferredTime, preferredDay })
     });
     const data = await res.json();
     if (data.success) {
@@ -899,6 +908,8 @@ async function saveMonitor() {
       document.getElementById("monitorKeywordInput").value = "";
       document.getElementById("monitorAliasInput").value = "";
       document.getElementById("monitorFrequency").value = "daily";
+      document.getElementById("monitorTime").value = "09:00";
+      document.getElementById("monitorDay").value = "Monday";
       loadMonitors();
     } else {
       alert(data.message || "Failed to save monitor");
@@ -908,10 +919,19 @@ async function saveMonitor() {
   }
 }
 
-// bind save button
+// bind save button and frequency change
 document.addEventListener("DOMContentLoaded", () => {
   const saveBtn = document.getElementById("saveMonitorBtn");
   if (saveBtn) saveBtn.onclick = saveMonitor;
+
+  const frequencySelect = document.getElementById("monitorFrequency");
+  const daySelect = document.getElementById("monitorDay");
+  if (frequencySelect && daySelect) {
+    frequencySelect.addEventListener("change", (e) => {
+      // Show day selector only for weekly
+      daySelect.style.display = e.target.value === "weekly" ? "block" : "none";
+    });
+  }
 });
 
 // load monitors on startup

@@ -597,7 +597,7 @@ app.get("/api/ai-visibility/history", authenticateToken, async (req, res) => {
 // Save a brand+keyword pair to auto-monitor
 app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
   try {
-    const { brandName, keyword, aliases = [], checkFrequency = "daily" } = req.body;
+    const { brandName, keyword, aliases = [], checkFrequency = "daily", preferredTime = "09:00", preferredDay = "Monday" } = req.body;
     if (!brandName || !keyword) {
       return res.status(400).json({ success: false, message: "brandName and keyword are required" });
     }
@@ -619,10 +619,12 @@ app.post("/api/ai-visibility/monitor", authenticateToken, async (req, res) => {
       keyword,
       aliases,
       checkFrequency,
-      nextCheckAt: getNextCheckAt(checkFrequency),
+      preferredTime,
+      preferredDay,
+      nextCheckAt: getNextCheckAt(checkFrequency, preferredTime),
     });
 
-    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" (${checkFrequency}) for user ${req.userId}`);
+    console.log(`✅ AI monitor saved: "${brandName}" + "${keyword}" (${checkFrequency} at ${preferredTime}) for user ${req.userId}`);
     res.json({ success: true, message: "Monitor saved", monitor });
   } catch (err) {
     console.error("Save monitor error:", err.message);
@@ -664,9 +666,42 @@ app.delete("/api/ai-visibility/monitor/:id", authenticateToken, async (req, res)
 
 // ==================== AI VISIBILITY SCHEDULER ====================
 
-function getNextCheckAt(frequency) {
+function getNextCheckAt(frequency, preferredTime = "09:00") {
+  const now = new Date();
+  const [prefHour, prefMin] = preferredTime.split(":").map(Number);
+
+  let nextCheck = new Date(now);
+  nextCheck.setHours(prefHour, prefMin, 0, 0);
+
   const ms = { "6h": 6, "12h": 12, "daily": 24, "weekly": 168, "monthly": 720 };
-  return new Date(Date.now() + (ms[frequency] ?? 24) * 60 * 60 * 1000);
+  const intervalHours = ms[frequency] ?? 24;
+
+  // If preferred time has already passed today, schedule for next interval
+  if (nextCheck <= now) {
+    nextCheck.setTime(nextCheck.getTime() + intervalHours * 60 * 60 * 1000);
+  }
+
+  return nextCheck;
+}
+
+function shouldRunMonitor(monitor, currentHour, currentDay) {
+  const [prefHour] = monitor.preferredTime.split(":").map(Number);
+
+  // Check if current hour matches preferred hour
+  if (currentHour !== prefHour) return false;
+
+  // Avoid running twice in same hour
+  if (monitor.lastRunHour === currentHour) return false;
+
+  // For weekly, check if today is the preferred day
+  if (monitor.checkFrequency === "weekly") {
+    if (currentDay !== monitor.preferredDay) return false;
+  }
+
+  // Check if nextCheckAt is due
+  if (new Date() < new Date(monitor.nextCheckAt)) return false;
+
+  return true;
 }
 
 function buildAlertHtml({ username, brandName, keyword, model, changeDescription, checkedAt }) {
@@ -722,12 +757,17 @@ async function runAIVisibilityChecks() {
 
   try {
     const now = new Date();
-    const monitors = await AIVisibilityMonitor.find({ isActive: true, nextCheckAt: { $lte: now } });
-    console.log(`📋 Found ${monitors.length} monitors due for checking`);
+    const currentHour = now.getHours();
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const currentDay = days[now.getDay()];
 
-    for (const monitor of monitors) {
+    const monitors = await AIVisibilityMonitor.find({ isActive: true });
+    const eligibleMonitors = monitors.filter(m => shouldRunMonitor(m, currentHour, currentDay));
+    console.log(`📋 Found ${eligibleMonitors.length} monitors due for checking (out of ${monitors.length} active)`);
+
+    for (const monitor of eligibleMonitors) {
       try {
-        const { brandName, keyword, userId, _id, aliases = [] } = monitor;
+        const { brandName, keyword, userId, _id, aliases = [], checkFrequency, preferredTime } = monitor;
         const allNames = [brandName, ...aliases.map(a => a.trim()).filter(a => a !== "")];
 
         const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a numbered list of exactly 5 top recommendations with a brief reason for each. Format strictly as:
@@ -842,10 +882,11 @@ async function runAIVisibilityChecks() {
           }
         }
 
-        // update lastCheckedAt and nextCheckAt based on frequency
+        // update lastCheckedAt, nextCheckAt, and lastRunHour based on frequency and preferred time
         await AIVisibilityMonitor.findByIdAndUpdate(_id, {
           lastCheckedAt: new Date(),
-          nextCheckAt: getNextCheckAt(monitor.checkFrequency),
+          nextCheckAt: getNextCheckAt(checkFrequency, preferredTime),
+          lastRunHour: currentHour,
         });
 
         const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");

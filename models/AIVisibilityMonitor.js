@@ -9,6 +9,9 @@ const aiVisibilityMonitorSchema = new mongoose.Schema({
   lastCheckedAt: { type: Date, default: null },
   alertsEnabled: { type: Boolean, default: true },
   checkFrequency: { type: String, enum: ["6h", "12h", "daily", "weekly", "monthly"], default: "daily" },
+  preferredTime: { type: String, default: "09:00" }, // HH:mm format, e.g., "09:00" for 9 AM
+  preferredDay: { type: String, enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], default: "Monday" }, // for weekly
+  lastRunHour: { type: Number, default: -1 }, // track which hour the check last ran to avoid duplicates
   nextCheckAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now }
 });

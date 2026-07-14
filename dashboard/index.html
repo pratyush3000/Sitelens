@@ -162,9 +162,19 @@
                         <select id="monitorFrequency">
                             <option value="6h">Every 6 hours</option>
                             <option value="12h">Every 12 hours</option>
-                            <option value="daily" selected>Daily (default)</option>
+                            <option value="daily" selected>Daily</option>
                             <option value="weekly">Weekly</option>
                             <option value="monthly">Monthly</option>
+                        </select>
+                        <input id="monitorTime" type="time" value="09:00" />
+                        <select id="monitorDay" style="display:none;">
+                            <option value="Monday">Monday</option>
+                            <option value="Tuesday">Tuesday</option>
+                            <option value="Wednesday">Wednesday</option>
+                            <option value="Thursday">Thursday</option>
+                            <option value="Friday">Friday</option>
+                            <option value="Saturday">Saturday</option>
+                            <option value="Sunday">Sunday</option>
                         </select>
                         <button id="saveMonitorBtn" class="btn-primary">Save Monitor</button>
                     </div>
