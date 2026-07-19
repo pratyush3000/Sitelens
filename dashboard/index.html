@@ -137,28 +137,71 @@
 
             <!-- AI Visibility Section -->
             <div class="section-label" style="margin-top:48px">
-                <span>🤖 AI Search Visibility</span>
+                <span>🤖 AI Search Visibility Monitor</span>
             </div>
 
             <section id="aiVisibility" class="ai-visibility-section">
-                <p class="ai-subtitle">Check if your brand appears when AI recommends products or services</p>
+                <h3>Instant Visibility Check</h3>
+                <p class="ai-subtitle">Check if your brand appears when AI recommends products or services in real-time</p>
 
                 <div class="ai-input-row">
                     <input id="brandInput" type="text" placeholder="Brand name (e.g. Netflix)" />
                     <input id="keywordInput" type="text" placeholder="Keyword (e.g. best streaming service)" />
-                    <button id="checkVisibilityBtn" class="btn-primary">Check Visibility</button>
+                    <button id="checkVisibilityBtn" class="btn-primary">🔍 Check Now</button>
                 </div>
 
                 <div id="aiResults" class="ai-results"></div>
 
+                <!-- AI Visibility Overview Dashboard -->
+                <div class="ai-analytics-section" id="aiAnalytics" style="display: none;">
+                    <div class="analytics-grid">
+                        <div class="analytics-card">
+                            <div class="analytics-label">Active Monitors</div>
+                            <div class="analytics-value" id="totalMonitors">0</div>
+                        </div>
+                        <div class="analytics-card">
+                            <div class="analytics-label">Visible Brands</div>
+                            <div class="analytics-value" id="visibleCount">0</div>
+                            <div class="analytics-percent" id="visiblePercent">0%</div>
+                        </div>
+                        <div class="analytics-card">
+                            <div class="analytics-label">Average Rank</div>
+                            <div class="analytics-value" id="avgRank">—</div>
+                        </div>
+                        <div class="analytics-card">
+                            <div class="analytics-label">Recent Checks</div>
+                            <div class="analytics-value" id="recentChecks">0</div>
+                            <div class="analytics-subtitle" id="recentCheckTime">Last 24h</div>
+                        </div>
+                    </div>
+
+                    <!-- Model Comparison -->
+                    <div class="model-comparison">
+                        <h4>🤖 Model Reliability</h4>
+                        <div class="model-stats" id="modelStats"></div>
+                    </div>
+
+                    <!-- Rank Distribution Chart -->
+                    <div class="rank-distribution">
+                        <h4>📊 Rank Distribution</h4>
+                        <div class="chart-wrapper">
+                            <canvas id="rankDistributionChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Auto-Monitor -->
                 <div class="ai-monitors-section">
-                    <h3>⏰ Auto-Monitor</h3>
-                    <p class="ai-subtitle">Save brand+keyword pairs with your preferred check frequency</p>
+                    <h3>📊 Automated Monitoring</h3>
+                    <p class="ai-subtitle">Track your brand visibility with scheduled AI checks</p>
+
                     <div class="ai-input-row">
                         <input id="monitorBrandInput" type="text" placeholder="Brand name" />
-                        <input id="monitorAliasInput" type="text" placeholder="Aliases, comma separated (optional)" />
+                        <input id="monitorAliasInput" type="text" placeholder="Aliases (comma separated)" />
                         <input id="monitorKeywordInput" type="text" placeholder="Keyword" />
+                    </div>
+
+                    <div class="ai-input-row">
                         <select id="monitorFrequency">
                             <option value="6h">Every 6 hours</option>
                             <option value="12h">Every 12 hours</option>
@@ -189,16 +232,19 @@
                             <option value="Saturday">Saturday</option>
                             <option value="Sunday">Sunday</option>
                         </select>
-                        <button id="saveMonitorBtn" class="btn-primary">Save Monitor</button>
+                        <button id="saveMonitorBtn" class="btn-primary">+ Add Monitor</button>
                     </div>
-                    <div id="monitorsList"></div>
+
                     <div id="monitorStatusMessage" style="margin-top: 16px; padding: 12px; border-radius: 6px; font-size: 14px; display: none;"></div>
+                    <div id="monitorsList"></div>
                 </div>
 
                 <!-- Trend Chart -->
                 <div class="ai-trend-section hidden" id="aiTrendSection">
                     <div class="ai-trend-header">
-                        <h3>📈 Rank Trend: <span id="aiTrendTitle"></span></h3>
+                        <div>
+                            <h3>📈 Rank Trend: <span id="aiTrendTitle"></span></h3>
+                        </div>
                         <button id="closeTrendBtn" class="btn-outline-sm">✕ Close</button>
                     </div>
                     <div class="chart-wrapper">
@@ -208,7 +254,7 @@
 
                 <!-- History -->
                 <div class="ai-history-section">
-                    <h3>📅 Check History</h3>
+                    <h3>📅 Historical Data</h3>
                     <div id="aiHistory"></div>
                 </div>
 

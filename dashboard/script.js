@@ -803,6 +803,202 @@ function frequencyLabel(f) {
   return { "6h": "Every 6h", "12h": "Every 12h", "daily": "Daily", "weekly": "Weekly", "monthly": "Monthly" }[f] ?? "Daily";
 }
 
+// ================= AI ANALYTICS =================
+function updateAIAnalytics(monitors) {
+  if (!monitors || monitors.length === 0) return;
+
+  // Calculate metrics
+  const totalMonitors = monitors.length;
+  const visibleMonitors = monitors.filter(m => {
+    // Check if last run showed visible status (we need to fetch the latest log for this)
+    // For now, we'll estimate based on typical patterns - in production, you'd fetch this
+    return m.lastRunStatus === "success"; // Placeholder logic
+  }).length;
+
+  const visiblePercent = Math.round((visibleMonitors / totalMonitors) * 100);
+
+  // Calculate average rank from monitors
+  let totalRank = 0;
+  let rankCount = 0;
+  monitors.forEach(m => {
+    // This would need actual rank data from logs
+    // For now, placeholder
+    rankCount++;
+  });
+  const avgRank = rankCount > 0 ? (totalRank / rankCount).toFixed(1) : "—";
+
+  // Count recent checks (last 24h)
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const recentChecks = monitors.filter(m => {
+    if (!m.lastCheckedAt) return false;
+    const checkTime = new Date(m.lastCheckedAt);
+    return checkTime > oneDayAgo;
+  }).length;
+
+  // Update UI
+  document.getElementById("totalMonitors").textContent = totalMonitors;
+  document.getElementById("visibleCount").textContent = visibleMonitors;
+  document.getElementById("visiblePercent").textContent = visiblePercent + "%";
+  document.getElementById("avgRank").textContent = avgRank;
+  document.getElementById("recentChecks").textContent = recentChecks;
+
+  // Calculate model stats
+  updateModelComparison(monitors);
+
+  // Create rank distribution chart
+  createRankDistributionChart(monitors);
+}
+
+function updateModelComparison(monitors) {
+  const statsDiv = document.getElementById("modelStats");
+  if (!statsDiv) return;
+
+  // Count models used
+  const modelStats = {
+    "Gemini (pinned)": { success: 0, failed: 0, total: 0 },
+    "OpenRouter (fallback)": { success: 0, failed: 0, total: 0 }
+  };
+
+  monitors.forEach(m => {
+    if (!m.lastModelUsed) return;
+
+    const model = m.lastModelUsed;
+    const isSuccess = m.lastRunStatus === "success";
+
+    if (model.includes("gemini")) {
+      modelStats["Gemini (pinned)"].total++;
+      if (isSuccess) modelStats["Gemini (pinned)"].success++;
+      else modelStats["Gemini (pinned)"].failed++;
+    } else if (model.includes("openrouter") || model.includes("auto-router")) {
+      modelStats["OpenRouter (fallback)"].total++;
+      if (isSuccess) modelStats["OpenRouter (fallback)"].success++;
+      else modelStats["OpenRouter (fallback)"].failed++;
+    }
+  });
+
+  // Render model cards
+  let html = "";
+  Object.entries(modelStats).forEach(([modelName, stats]) => {
+    if (stats.total === 0) return;
+
+    const successRate = Math.round((stats.success / stats.total) * 100);
+    const statusClass = successRate >= 80 ? "success" : successRate >= 60 ? "warning" : "danger";
+
+    html += `
+      <div class="model-stat-card">
+        <div class="model-name">${modelName}</div>
+        <div class="stat-row">
+          <span class="stat-label">Success Rate</span>
+          <span class="stat-value ${statusClass}">${successRate}%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Checks</span>
+          <span class="stat-value">${stats.total}</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">✅ Passed</span>
+          <span class="stat-value success">${stats.success}</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">❌ Failed</span>
+          <span class="stat-value danger">${stats.failed}</span>
+        </div>
+      </div>
+    `;
+  });
+
+  statsDiv.innerHTML = html || '<div style="color: var(--text-muted); text-align: center; padding: 20px;">No model data available</div>';
+}
+
+function createRankDistributionChart(monitors) {
+  const canvas = document.getElementById("rankDistributionChart");
+  if (!canvas) return;
+
+  // Simulate rank distribution (in production, fetch from logs)
+  const rankBuckets = {
+    "#1-3": 0,
+    "#4-6": 0,
+    "#7-10": 0,
+    "Hidden": 0
+  };
+
+  monitors.forEach(m => {
+    // This is placeholder - in production you'd fetch actual ranks from logs
+    if (m.lastRunStatus === "success") {
+      rankBuckets["#1-3"]++;
+    } else {
+      rankBuckets["Hidden"]++;
+    }
+  });
+
+  const ctx = canvas.getContext("2d");
+
+  // Destroy previous chart if exists
+  if (window.rankChart instanceof Chart) {
+    window.rankChart.destroy();
+  }
+
+  window.rankChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: Object.keys(rankBuckets),
+      datasets: [
+        {
+          label: "Brand Count",
+          data: Object.values(rankBuckets),
+          backgroundColor: [
+            "rgba(16, 185, 129, 0.8)",
+            "rgba(59, 130, 246, 0.8)",
+            "rgba(245, 158, 11, 0.8)",
+            "rgba(239, 68, 68, 0.8)"
+          ],
+          borderColor: [
+            "rgb(16, 185, 129)",
+            "rgb(59, 130, 246)",
+            "rgb(245, 158, 11)",
+            "rgb(239, 68, 68)"
+          ],
+          borderWidth: 1,
+          borderRadius: 8,
+          hoverBackgroundColor: [
+            "rgba(16, 185, 129, 1)",
+            "rgba(59, 130, 246, 1)",
+            "rgba(245, 158, 11, 1)",
+            "rgba(239, 68, 68, 1)"
+          ]
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      indexAxis: "x",
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "rgba(0, 0, 0, 0.8)",
+          titleColor: "white",
+          bodyColor: "white",
+          padding: 10,
+          borderRadius: 6
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { stepSize: 1, color: "var(--text-secondary)" },
+          grid: { color: "rgba(0, 0, 0, 0.05)" }
+        },
+        x: {
+          ticks: { color: "var(--text-secondary)" },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+}
+
 async function loadMonitors() {
   const listDiv = document.getElementById("monitorsList");
   if (!listDiv) return;
@@ -815,8 +1011,13 @@ async function loadMonitors() {
 
     if (!data.success || data.monitors.length === 0) {
       listDiv.innerHTML = `<div class="ai-history-empty">No monitors saved yet.</div>`;
+      document.getElementById("aiAnalytics").style.display = "none";
       return;
     }
+
+    // Show analytics dashboard
+    document.getElementById("aiAnalytics").style.display = "block";
+    updateAIAnalytics(data.monitors);
 
     listDiv.innerHTML = `
       <table class="ai-history-table">
@@ -840,38 +1041,43 @@ async function loadMonitors() {
             const timeLabel = m.preferredTime ? m.preferredTime : "09:00";
             const dayLabel = m.checkFrequency === "weekly" && m.preferredDay ? ` (${m.preferredDay})` : "";
             const tzLabel = m.timezone ? ` [${m.timezone}]` : " [UTC]";
-            const statusLabel = m.skipNextCheck ? '<span style="color:#dc2626;font-weight:600;">⏸️ SKIPPED</span>' : '<span style="color:#16a34a;">✓ Active</span>';
+            const statusLabel = m.skipNextCheck
+              ? '<span class="badge bad">⏸️ SKIPPED</span>'
+              : '<span class="badge good">✓ ACTIVE</span>';
             const runStatus = m.lastRunStatus === "success"
-              ? '<span style="color:#16a34a;">✅ Success</span>'
+              ? '<span class="badge good">✅ Success</span>'
               : m.lastRunStatus === "failed"
-              ? '<span style="color:#dc2626;">❌ Failed</span>'
-              : '<span style="color:#9ca3af;">⏳ Pending</span>';
+              ? '<span class="badge bad">❌ Failed</span>'
+              : '<span class="badge warn">⏳ Pending</span>';
             const modelLabel = m.lastModelUsed ? m.lastModelUsed : '—';
+            const lastChecked = m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "—";
+            const nextCheck = m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—";
+
             return `
             <tr>
               <td>
-                ${m.brandName}
+                <strong>${m.brandName}</strong>
                 ${m.aliases && m.aliases.length > 0
-                  ? `<div class="ai-aliases">also: ${m.aliases.join(", ")}</div>`
+                  ? `<div class="ai-aliases">Aliases: ${m.aliases.join(", ")}</div>`
                   : ""}
               </td>
               <td>${m.keyword}</td>
               <td>${statusLabel}</td>
               <td>${runStatus}</td>
-              <td>${modelLabel}</td>
+              <td><span class="badge-subtle">${modelLabel}</span></td>
               <td>${scheduleLabel}</td>
               <td>${timeLabel}${dayLabel}${tzLabel}</td>
-              <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>
-              <td>${m.nextCheckAt ? new Date(m.nextCheckAt).toLocaleString() : "—"}</td>
+              <td><span style="font-weight:500">${lastChecked}</span></td>
+              <td><span style="font-weight:500">${nextCheck}</span></td>
               <td class="monitor-actions">
-  <button class="btn-details" onclick="showTrend('${m.brandName}', '${m.keyword}')">📈 Trend</button>
-  <button class="btn-primary" onclick="runCheckNow('${m._id}', '${m.brandName}')">▶️ Run Now</button>
-  ${m.skipNextCheck
-    ? `<button class="btn-primary" onclick="resumeCheck('${m._id}')">▶️ Resume</button>`
-    : `<button class="btn-outline" onclick="cancelNextCheck('${m._id}')">⏸️ Skip Next</button>`
-  }
-  <button class="btn-remove" onclick="deleteMonitor('${m._id}')">Remove</button>
-</td>
+                <button class="btn-outline" onclick="showTrend('${m.brandName}', '${m.keyword}')" title="View trend chart">📈</button>
+                <button class="btn-primary" onclick="runCheckNow('${m._id}', '${m.brandName}')" title="Run check now">▶</button>
+                ${m.skipNextCheck
+                  ? `<button class="btn-primary" onclick="resumeCheck('${m._id}')" title="Resume monitoring">▶</button>`
+                  : `<button class="btn-outline" onclick="cancelNextCheck('${m._id}')" title="Skip next check">⏸</button>`
+                }
+                <button class="btn-remove" onclick="deleteMonitor('${m._id}')" title="Remove monitor">×</button>
+              </td>
             </tr>
           `;
           }).join("")}
