@@ -10,7 +10,7 @@ export async function checkBrandVisibility(prompt, model, allNames, retryCount =
   let aiResponse = "";
   let rawResponse = "";
   let modelUsed = model;
-  let modelSource = "unknown";  // Track: "pinned" or "auto-router"
+  let modelSource = "pinned";  // Track: "pinned" or "auto-router" (default pinned)
 
   if (model === "gemini") {
     if (!geminiKey) throw new Error("Gemini API key not configured");
