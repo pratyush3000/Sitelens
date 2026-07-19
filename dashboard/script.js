@@ -217,14 +217,14 @@ function makeCard(site, s){
   card.appendChild(row4);
 
   const actions = document.createElement("div");
-  actions.className = "row card-actions";
+  actions.className = "card-actions";
   const detailsBtn = document.createElement("button");
   detailsBtn.className = "btn-details";
-  detailsBtn.textContent = "Details";
+  detailsBtn.innerHTML = '<span>📊</span> <span>View Details</span>';
   detailsBtn.onclick = (e) => { e.stopPropagation(); openDetails({ currentTarget: card }); };
   const removeBtn = document.createElement("button");
   removeBtn.className = "btn-remove";
-  removeBtn.textContent = "Remove";
+  removeBtn.innerHTML = '<span>🗑️</span> <span>Remove</span>';
   removeBtn.onclick = (e) => { e.stopPropagation(); removeSite(site); };
   actions.appendChild(detailsBtn);
   actions.appendChild(removeBtn);
