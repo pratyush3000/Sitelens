@@ -1100,6 +1100,7 @@ async function runAIVisibilityChecks() {
 
         // Determine which models were used (show all successful models)
         const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
+        const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
         let lastModelUsed = null;
 
         if (successfulResults.length > 0) {
