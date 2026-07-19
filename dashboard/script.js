@@ -826,6 +826,7 @@ async function loadMonitors() {
             <th>Keyword</th>
             <th>Status</th>
             <th>Run Status</th>
+            <th>Model Used</th>
             <th>Schedule</th>
             <th>Time</th>
             <th>Last Checked</th>
@@ -845,6 +846,7 @@ async function loadMonitors() {
               : m.lastRunStatus === "failed"
               ? '<span style="color:#dc2626;">❌ Failed</span>'
               : '<span style="color:#9ca3af;">⏳ Pending</span>';
+            const modelLabel = m.lastModelUsed ? m.lastModelUsed : '—';
             return `
             <tr>
               <td>
@@ -856,6 +858,7 @@ async function loadMonitors() {
               <td>${m.keyword}</td>
               <td>${statusLabel}</td>
               <td>${runStatus}</td>
+              <td>${modelLabel}</td>
               <td>${scheduleLabel}</td>
               <td>${timeLabel}${dayLabel}${tzLabel}</td>
               <td>${m.lastCheckedAt ? new Date(m.lastCheckedAt).toLocaleString() : "⏳ Waiting..."}</td>

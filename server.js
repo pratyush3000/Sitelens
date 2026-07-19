@@ -774,20 +774,32 @@ app.post("/api/ai-visibility/monitor/:id/run-now", authenticateToken, async (req
       }
     }
 
+    // Determine which model was used (prefer visible results, then any successful result)
+    const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
+    const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
+    let lastModelUsed = null;
+
+    if (visibleResults.length > 0) {
+      const visibleModel = visibleResults[0];
+      lastModelUsed = `${visibleModel.model} (${visibleModel.modelSource})`;
+    } else if (successfulResults.length > 0) {
+      const successModel = successfulResults[0];
+      lastModelUsed = `${successModel.model} (${successModel.modelSource})`;
+    }
+
+    const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
+
     // Update monitor with status
     const updateData = {
       lastCheckedAt: new Date(),
       nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, monitor.timezone),
       lastRunHour: new Date().getHours(),
       lastRunStatus: checksPassed > 0 ? "success" : "failed",
-      lastRunError: checksPassed > 0 ? null : "No models returned results"
+      lastRunError: checksPassed > 0 ? null : "No models returned results",
+      lastModelUsed: lastModelUsed
     };
 
     await AIVisibilityMonitor.findByIdAndUpdate(_id, updateData);
-
-    const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
-    const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
-    const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
 
     res.json({
       success: true,
@@ -1088,15 +1100,28 @@ async function runAIVisibilityChecks() {
           }
         }
 
+        // Determine which model was used (prefer visible results, then any successful result)
+        const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
+        const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
+        let lastModelUsed = null;
+
+        if (visibleResults.length > 0) {
+          // If brand is visible, use the model that found it
+          const visibleModel = visibleResults[0];
+          lastModelUsed = `${visibleModel.model} (${visibleModel.modelSource})`;
+        } else if (successfulResults.length > 0) {
+          // Otherwise use the first successful result
+          const successModel = successfulResults[0];
+          lastModelUsed = `${successModel.model} (${successModel.modelSource})`;
+        }
+
         // update lastCheckedAt, nextCheckAt, and lastRunHour based on frequency and preferred time
         await AIVisibilityMonitor.findByIdAndUpdate(_id, {
           lastCheckedAt: new Date(),
           nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, monitor.timezone),
           lastRunHour: currentHour,
+          lastModelUsed: lastModelUsed
         });
-
-        const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
-        const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
         const errorCount = models.length - successfulResults.length;
         const status = visibleResults.length > 0 ? `VISIBLE in ${visibleResults.length} of ${successfulResults.length}` : "HIDDEN";
         const errorMsg = errorCount > 0 ? ` [${errorCount} model(s) failed]` : "";
