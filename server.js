@@ -774,17 +774,15 @@ app.post("/api/ai-visibility/monitor/:id/run-now", authenticateToken, async (req
       }
     }
 
-    // Determine which model was used (prefer visible results, then any successful result)
+    // Determine which models were used (show all successful models)
     const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
     const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
     let lastModelUsed = null;
 
-    if (visibleResults.length > 0) {
-      const visibleModel = visibleResults[0];
-      lastModelUsed = `${visibleModel.model} (${visibleModel.modelSource})`;
-    } else if (successfulResults.length > 0) {
-      const successModel = successfulResults[0];
-      lastModelUsed = `${successModel.model} (${successModel.modelSource})`;
+    if (successfulResults.length > 0) {
+      // Show all successful models with their sources
+      const modelStrings = successfulResults.map(r => `${r.model} (${r.modelSource})`);
+      lastModelUsed = modelStrings.join(", ");
     }
 
     const bestRank = visibleResults.length > 0 ? Math.min(...visibleResults.map(r => r.rank)) : null;
@@ -1100,19 +1098,14 @@ async function runAIVisibilityChecks() {
           }
         }
 
-        // Determine which model was used (prefer visible results, then any successful result)
+        // Determine which models were used (show all successful models)
         const successfulResults = Object.values(results).filter(r => r.status !== "ERROR");
-        const visibleResults = successfulResults.filter(r => r.status === "VISIBLE");
         let lastModelUsed = null;
 
-        if (visibleResults.length > 0) {
-          // If brand is visible, use the model that found it
-          const visibleModel = visibleResults[0];
-          lastModelUsed = `${visibleModel.model} (${visibleModel.modelSource})`;
-        } else if (successfulResults.length > 0) {
-          // Otherwise use the first successful result
-          const successModel = successfulResults[0];
-          lastModelUsed = `${successModel.model} (${successModel.modelSource})`;
+        if (successfulResults.length > 0) {
+          // Show all successful models with their sources
+          const modelStrings = successfulResults.map(r => `${r.model} (${r.modelSource})`);
+          lastModelUsed = modelStrings.join(", ");
         }
 
         // update lastCheckedAt, nextCheckAt, and lastRunHour based on frequency and preferred time
