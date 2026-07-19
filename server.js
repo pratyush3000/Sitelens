@@ -983,7 +983,7 @@ async function runAIVisibilityChecks() {
 
     for (const monitor of eligibleMonitors) {
       try {
-        const { brandName, keyword, userId, _id, aliases = [], checkFrequency, preferredTime } = monitor;
+        const { brandName, keyword, userId, _id, aliases = [], checkFrequency, preferredTime, timezone } = monitor;
         const allNames = [brandName, ...aliases.map(a => a.trim()).filter(a => a !== "")];
 
         const prompt = `You are a helpful assistant. A user asks: "What are the best ${keyword} options available right now?" Provide a numbered list of exactly 5 top recommendations with a brief reason for each. Format strictly as:
@@ -1108,11 +1108,10 @@ async function runAIVisibilityChecks() {
           lastModelUsed = modelStrings.join(", ");
         }
 
-        // update lastCheckedAt, nextCheckAt, and lastRunHour based on frequency and preferred time
+        // update lastCheckedAt, nextCheckAt based on frequency and preferred time
         await AIVisibilityMonitor.findByIdAndUpdate(_id, {
           lastCheckedAt: new Date(),
-          nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, monitor.timezone),
-          lastRunHour: currentHour,
+          nextCheckAt: getNextCheckAt(checkFrequency, preferredTime, timezone),
           lastModelUsed: lastModelUsed
         });
         const errorCount = models.length - successfulResults.length;
