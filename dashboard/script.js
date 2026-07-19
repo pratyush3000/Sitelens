@@ -5,6 +5,26 @@ let timer = null;
 
 const $ = id => document.getElementById(id);
 
+// ================= TOAST NOTIFICATIONS =================
+function showToast(message, type = 'info', duration = 4000) {
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `
+    <span>${message}</span>
+    <span class="toast-close" onclick="this.parentElement.remove()">×</span>
+  `;
+  document.body.appendChild(toast);
+
+  if (duration > 0) {
+    setTimeout(() => {
+      toast.style.animation = 'slideInRight 0.3s ease-out reverse';
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
 // ================= AUTH HELPERS =================
 function getToken() {
   return localStorage.getItem("authToken");
@@ -188,7 +208,14 @@ function renderOverview(statsObj){
 
 function makeCard(site, s){
   const card = document.createElement("div");
-  card.className = "card";
+
+  // Determine status based on uptime
+  let status = "status-up";
+  const uptime = parseFloat(s.uptimePercent) || 100;
+  if (uptime < 95) status = "status-warn";
+  if (uptime < 90) status = "status-down";
+
+  card.className = `card ${status}`;
   card.dataset.site = site;
 
   const header = document.createElement("div");
@@ -571,7 +598,15 @@ if($('lastUpdatedFooter')) $('lastUpdatedFooter').innerText = timeStr;
 // ================= ADD SITE =================
 async function addSite() {
   const url = $("siteInput").value.trim();
-  if (!url) return alert("Enter a valid URL");
+  if (!url) {
+    showToast("Enter a valid URL", "error");
+    return;
+  }
+
+  const btn = document.querySelector('.add-site-inner .btn-primary');
+  const originalText = btn.innerHTML;
+  btn.classList.add('loading');
+  btn.disabled = true;
 
   try {
     const res = await fetch("/api/add-site", {
@@ -583,11 +618,20 @@ async function addSite() {
       body: JSON.stringify({ url })
     });
     const data = await res.json();
-    alert(data.message || (data.success ? "Monitoring started." : "Failed."));
-    if (data.success) loadStats();
+
+    if (data.success) {
+      showToast(`✓ Now monitoring ${url}`, 'success');
+      $("siteInput").value = "";
+      loadStats();
+    } else {
+      showToast(data.message || "Failed to add site", 'error');
+    }
   } catch (err) {
-    alert("Failed to add site. Check connection.");
+    showToast("Connection error. Try again.", 'error');
     console.error(err);
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
   }
 }
 
@@ -595,6 +639,7 @@ async function addSite() {
 async function removeSite(url) {
   if (!url) return;
   if (!confirm(`Stop monitoring "${url}"? This will remove the site and its logs.`)) return;
+
   try {
     const res = await fetch("/api/remove-site", {
       method: "POST",
@@ -605,10 +650,15 @@ async function removeSite(url) {
       body: JSON.stringify({ url })
     });
     const data = await res.json();
-    alert(data.message || (data.success ? "Monitoring stopped." : "Failed."));
-    if (data.success) loadStats();
+
+    if (data.success) {
+      showToast(`✓ Stopped monitoring ${url}`, 'success');
+      loadStats();
+    } else {
+      showToast(data.message || "Failed to remove site", 'error');
+    }
   } catch (err) {
-    alert("Failed to remove site. Check connection.");
+    showToast("Connection error. Try again.", 'error');
     console.error(err);
   }
 }
@@ -653,11 +703,16 @@ window.checkVisibility = async function() {
   const brandName = $("brandInput").value.trim();
   const keyword = $("keywordInput").value.trim();
   const resultsDiv = $("aiResults");
+  const btn = document.getElementById("checkVisibilityBtn");
 
   if (!brandName || !keyword) {
-    alert("Please enter both a brand name and a keyword.");
+    showToast("Enter brand name and keyword", 'error');
     return;
   }
+
+  // Add loading state to button
+  btn.classList.add('loading');
+  btn.disabled = true;
 
   // Show loading state
   resultsDiv.innerHTML = `
@@ -680,6 +735,7 @@ window.checkVisibility = async function() {
 
     if (!data.success) {
       resultsDiv.innerHTML = `<div class="ai-result-card error">❌ ${data.message}</div>`;
+      showToast(data.message || "Check failed", 'error');
       return;
     }
 
@@ -738,10 +794,16 @@ card.innerHTML = `
     }
     resultsDiv.insertBefore(card, resultsDiv.firstChild);
     loadAIHistory(); // refresh history after each new check
+    showToast(`✓ Check complete for "${brandName}"`, 'success');
 
   } catch (err) {
     resultsDiv.innerHTML = `<div class="ai-result-card error">❌ Network error. Try again.</div>`;
+    showToast("Network error. Try again.", 'error');
     console.error(err);
+  } finally {
+    // Remove loading state from button
+    btn.classList.remove('loading');
+    btn.disabled = false;
   }
 };
 
